@@ -1,0 +1,54 @@
+{
+	"name": "@absolutejs/dispatch-twilio",
+	"version": "0.0.1",
+	"description": "Twilio-backed SmsAdapter for @absolutejs/dispatch. Maps SmsMessage to Twilio messages.create; surfaces the Message SID as DispatchResult.id.",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/absolutejs/dispatch-adapters.git",
+		"directory": "twilio"
+	},
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"type": "module",
+	"license": "Apache-2.0",
+	"author": "Alex Kahn",
+	"publishConfig": {
+		"access": "public"
+	},
+	"keywords": [
+		"dispatch",
+		"sms",
+		"twilio",
+		"absolutejs",
+		"transactional"
+	],
+	"scripts": {
+		"build": "rm -rf dist && bun build src/index.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external twilio && tsc --project tsconfig.build.json",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"format": "prettier --write \"./**/*.{ts,json,md}\"",
+		"release": "bun run format && bun run build && bun publish"
+	},
+	"peerDependencies": {
+		"@absolutejs/dispatch": ">= 0.0.1",
+		"twilio": ">= 5.0.0"
+	},
+	"devDependencies": {
+		"@absolutejs/dispatch": "^0.0.1",
+		"@types/bun": "1.3.14",
+		"prettier": "3.5.3",
+		"typescript": "5.8.3"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	]
+}
