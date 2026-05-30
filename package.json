@@ -1,0 +1,14 @@
+{
+	"name": "dispatch-adapters",
+	"private": true,
+	"description": "Monorepo root for @absolutejs/dispatch vendor adapters. Subpackages live in ./<name>/ and publish independently.",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/absolutejs/dispatch-adapters.git"
+	},
+	"license": "Apache-2.0",
+	"author": "Alex Kahn",
+	"workspaces": [
+		"resend"
+	]
+}
