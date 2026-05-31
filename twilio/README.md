@@ -3,6 +3,8 @@
 Twilio-backed `SmsAdapter` for
 [@absolutejs/dispatch](https://github.com/absolutejs/dispatch).
 
+**Docs:** [absolutejs.com/documentation/dispatch-overview#twilio](https://absolutejs.com/documentation/dispatch-overview#twilio)
+
 ## Install
 
 ```sh
