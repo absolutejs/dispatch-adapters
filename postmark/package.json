@@ -7,6 +7,10 @@
 		"url": "https://github.com/absolutejs/dispatch-adapters.git",
 		"directory": "postmark"
 	},
+	"homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/postmark",
+	"bugs": {
+		"url": "https://github.com/absolutejs/dispatch-adapters/issues"
+	},
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",

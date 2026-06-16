@@ -7,6 +7,10 @@
 		"url": "https://github.com/absolutejs/dispatch-adapters.git",
 		"directory": "twilio"
 	},
+	"homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/twilio",
+	"bugs": {
+		"url": "https://github.com/absolutejs/dispatch-adapters/issues"
+	},
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",
