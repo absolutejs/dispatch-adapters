@@ -63,5 +63,3 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
 	settings: Type.Object({}),
 	wiring: []
 });
-
-export default manifest;

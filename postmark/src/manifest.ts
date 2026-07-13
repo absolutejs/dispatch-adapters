@@ -71,5 +71,3 @@ export const manifest = defineManifest<CreatePostmarkAdapterOptions>()({
 	settings: Type.Object({}),
 	wiring: []
 });
-
-export default manifest;

@@ -77,5 +77,3 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
 	settings: Type.Object({}),
 	wiring: []
 });
-
-export default manifest;
