@@ -1,6 +1,6 @@
 {
 	"name": "@absolutejs/dispatch-postmark",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "Postmark-backed EmailAdapter for @absolutejs/dispatch. Maps EmailMessage to Postmark's sendEmail params; surfaces the MessageID as DispatchResult.id.",
 	"repository": {
 		"type": "git",
