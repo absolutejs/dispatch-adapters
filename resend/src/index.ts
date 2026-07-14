@@ -18,20 +18,28 @@ import type { EmailAdapter, EmailMessage } from '@absolutejs/dispatch';
  * locally keeps `resend` a true peer dep — its types aren't required
  * at compile time, only its tag-template-style API at runtime.
  */
+type ResendEmailBase = {
+	from: string;
+	to: string | string[];
+	subject: string;
+	reply_to?: string | string[];
+	cc?: string | string[];
+	bcc?: string | string[];
+	headers?: Record<string, string>;
+	tags?: Array<{ name: string; value: string }>;
+};
+
+type ResendEmailParams = ResendEmailBase &
+	(
+		| { html: string; text?: string }
+		| { text: string; html?: string }
+	);
+
 export type ResendClientLike = {
 	emails: {
-		send: (params: {
-			from: string;
-			to: string | string[];
-			subject: string;
-			text?: string;
-			html?: string;
-			reply_to?: string | string[];
-			cc?: string | string[];
-			bcc?: string | string[];
-			headers?: Record<string, string>;
-			tags?: Array<{ name: string; value: string }>;
-		}) => Promise<{ data?: { id?: string } | null; error?: unknown }>;
+		send: (
+			params: ResendEmailParams
+		) => Promise<{ data?: { id?: string } | null; error?: unknown }>;
 	};
 };
 
@@ -94,13 +102,26 @@ export const createResendAdapter = (
 				message.metadata !== undefined
 					? tagsFromMetadata(message.metadata)
 					: undefined;
+			if (message.text === undefined && message.html === undefined) {
+				throw new Error(
+					'[dispatch-resend] email requires `text` or `html` content.'
+				);
+			}
+			const content =
+				message.html !== undefined
+					? {
+							html: message.html,
+							...(message.text !== undefined
+								? { text: message.text }
+								: {})
+						}
+					: { text: message.text! };
 			const response = await client.emails.send({
+				...content,
 				from,
 				to:
 					typeof message.to === 'string' ? message.to : [...message.to],
 				subject: message.subject,
-				...(message.text !== undefined ? { text: message.text } : {}),
-				...(message.html !== undefined ? { html: message.html } : {}),
 				...(message.replyTo !== undefined
 					? { reply_to: message.replyTo }
 					: {}),

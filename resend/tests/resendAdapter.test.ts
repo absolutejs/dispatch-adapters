@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createDispatcher } from '@absolutejs/dispatch';
+import { Resend } from 'resend';
 import { createResendAdapter, type ResendClientLike } from '../src/index';
 
 /**
@@ -32,6 +33,11 @@ const makeMockResend = () => {
 };
 
 describe('createResendAdapter', () => {
+	test('accepts the current real Resend client type', () => {
+		const client: ResendClientLike = new Resend('re_typecheck_only');
+		expect(createResendAdapter({ client }).name).toBe('resend');
+	});
+
 	test('maps EmailMessage fields to Resend params', async () => {
 		const mock = makeMockResend();
 		const adapter = createResendAdapter({ client: mock.client });
@@ -88,6 +94,18 @@ describe('createResendAdapter', () => {
 		await expect(
 			dispatcher.email({ subject: 's', text: 't', to: 'a@b.c' })
 		).rejects.toThrow(/no `from` address/);
+	});
+
+	test('throws before the client when neither text nor html is present', async () => {
+		const mock = makeMockResend();
+		const adapter = createResendAdapter({
+			client: mock.client,
+			defaultFrom: 'no-reply@acme.io'
+		});
+		await expect(
+			adapter.send({ subject: 'empty', to: 'a@b.c' })
+		).rejects.toThrow(/requires `text` or `html`/);
+		expect(mock.calls).toHaveLength(0);
 	});
 
 	test('array `to` is passed through', async () => {

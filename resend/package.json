@@ -1,6 +1,6 @@
 {
 	"name": "@absolutejs/dispatch-resend",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "Resend-backed EmailAdapter for @absolutejs/dispatch. Takes your Resend client; emits standard DispatchResult with the Resend message id.",
 	"repository": {
 		"type": "git",

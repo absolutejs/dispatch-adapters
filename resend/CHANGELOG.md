@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3] — 2026-07-14
+
+- Make `ResendClientLike` structurally compatible with the current Resend SDK
+  by expressing its required text-or-HTML content union.
+- Reject empty-content messages before invoking the provider. This prevents an
+  invalid request shape that current Resend clients correctly refuse to type.
+
 ## [0.0.1] — 2026-05-30
 
 Initial preview. Resend-backed `EmailAdapter` for `@absolutejs/dispatch`.
