@@ -1,0 +1,70 @@
+{
+  "name": "@absolutejs/dispatch-apns",
+  "version": "0.0.1",
+  "description": "Apple Push Notification service HTTP/2 PushAdapter for @absolutejs/dispatch with ES256 provider-token rotation.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/absolutejs/dispatch-adapters.git",
+    "directory": "apns"
+  },
+  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/apns",
+  "bugs": {
+    "url": "https://github.com/absolutejs/dispatch-adapters/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Alex Kahn",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dispatch",
+    "push",
+    "apns",
+    "apple",
+    "absolutejs"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"./**/*.{ts,json,md}\"",
+    "release": "bun run format && bun run build && bun publish"
+  },
+  "peerDependencies": {
+    "@absolutejs/dispatch": ">= 0.0.1"
+  },
+  "devDependencies": {
+    "@absolutejs/dispatch": "^0.0.3",
+    "@types/bun": "1.3.14",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "default": "./dist/manifest.js"
+    },
+    "./manifest.json": "./dist/manifest.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "absolutejs": {
+    "manifestContract": 1
+  },
+  "dependencies": {
+    "@absolutejs/manifest": "^0.1.0",
+    "@sinclair/typebox": "^0.34.0"
+  }
+}

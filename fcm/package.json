@@ -1,0 +1,72 @@
+{
+  "name": "@absolutejs/dispatch-fcm",
+  "version": "0.0.1",
+  "description": "Firebase Cloud Messaging HTTP v1 PushAdapter for @absolutejs/dispatch with ADC and short-lived OAuth token support.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/absolutejs/dispatch-adapters.git",
+    "directory": "fcm"
+  },
+  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/fcm",
+  "bugs": {
+    "url": "https://github.com/absolutejs/dispatch-adapters/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Alex Kahn",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dispatch",
+    "push",
+    "fcm",
+    "firebase",
+    "absolutejs"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external google-auth-library && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"./**/*.{ts,json,md}\"",
+    "release": "bun run format && bun run build && bun publish"
+  },
+  "peerDependencies": {
+    "@absolutejs/dispatch": ">= 0.0.1",
+    "google-auth-library": ">= 10.0.0"
+  },
+  "devDependencies": {
+    "@absolutejs/dispatch": "^0.0.3",
+    "@types/bun": "1.3.14",
+    "google-auth-library": "^10.9.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "default": "./dist/manifest.js"
+    },
+    "./manifest.json": "./dist/manifest.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "absolutejs": {
+    "manifestContract": 1
+  },
+  "dependencies": {
+    "@absolutejs/manifest": "^0.1.0",
+    "@sinclair/typebox": "^0.34.0"
+  }
+}
