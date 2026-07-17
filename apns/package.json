@@ -4,7 +4,7 @@
   "description": "Apple Push Notification service HTTP/2 PushAdapter for @absolutejs/dispatch with ES256 provider-token rotation.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/absolutejs/dispatch-adapters.git",
+		"url": "git+https://github.com/absolutejs/dispatch-adapters.git",
     "directory": "apns"
   },
   "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/apns",

@@ -1,10 +1,10 @@
 {
   "name": "@absolutejs/dispatch-fcm",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Firebase Cloud Messaging HTTP v1 PushAdapter for @absolutejs/dispatch with ADC and short-lived OAuth token support.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/absolutejs/dispatch-adapters.git",
+    "url": "git+https://github.com/absolutejs/dispatch-adapters.git",
     "directory": "fcm"
   },
   "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/fcm",

@@ -94,11 +94,20 @@ const accessTokenFor = async (auth: GoogleAuthLike) => {
 
 const responseError = async (response: Response) => {
   const payload = (await response.json().catch(() => ({}))) as {
-    error?: { message?: string; status?: string };
+    error?: {
+      details?: Array<{ errorCode?: string }>;
+      message?: string;
+      status?: string;
+    };
   };
+  const detailCode = payload.error?.details?.find(
+    (detail) => typeof detail.errorCode === "string",
+  )?.errorCode;
 
   return new FcmDispatchError({
-    ...(payload.error?.status ? { code: payload.error.status } : {}),
+    ...((detailCode ?? payload.error?.status)
+      ? { code: detailCode ?? payload.error?.status }
+      : {}),
     message:
       payload.error?.message ??
       `[dispatch-fcm] FCM request failed with HTTP ${response.status}`,

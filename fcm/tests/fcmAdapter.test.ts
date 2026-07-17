@@ -62,6 +62,7 @@ describe("FCM push adapter", () => {
         return Response.json(
           {
             error: {
+              details: [{ errorCode: "UNREGISTERED" }],
               message: "Registration token is invalid",
               status: "INVALID_ARGUMENT",
             },
@@ -75,7 +76,7 @@ describe("FCM push adapter", () => {
     await expect(
       adapter.send({ body: "Incident", to: "/topics/operations" }),
     ).rejects.toMatchObject({
-      code: "INVALID_ARGUMENT",
+      code: "UNREGISTERED",
       status: 400,
     });
   });
