@@ -14,25 +14,25 @@ bun add @absolutejs/dispatch @absolutejs/dispatch-resend resend
 ## Usage
 
 ```ts
-import { Resend } from 'resend';
-import { createDispatcher } from '@absolutejs/dispatch';
-import { createResendAdapter } from '@absolutejs/dispatch-resend';
+import { Resend } from "resend";
+import { createDispatcher } from "@absolutejs/dispatch";
+import { createResendAdapter } from "@absolutejs/dispatch-resend";
 
 const resend = new Resend(process.env.RESEND_KEY!);
 
 const dispatcher = createDispatcher({
   email: createResendAdapter({
     client: resend,
-    defaultFrom: 'no-reply@acme.io',
+    defaultFrom: "no-reply@acme.io",
   }),
 });
 
 const result = await dispatcher.email({
-  to: 'alice@example.com',
-  subject: 'Welcome to Acme',
-  text: 'Click here to verify: ...',
+  to: "alice@example.com",
+  subject: "Welcome to Acme",
+  text: "Click here to verify: ...",
   // String metadata becomes Resend tags by default:
-  metadata: { campaign: 'welcome-v2', priority: 'high' },
+  metadata: { campaign: "welcome-v2", priority: "high" },
 });
 
 console.log(result.id); // Resend's message id
@@ -62,8 +62,8 @@ createResendAdapter({
   client: resend,
   tagsFromMetadata: (metadata) => [
     // Always include the tenant
-    ...(typeof metadata.tenant === 'string'
-      ? [{ name: 'tenant', value: metadata.tenant }]
+    ...(typeof metadata.tenant === "string"
+      ? [{ name: "tenant", value: metadata.tenant }]
       : []),
     // Drop debug-only entries
   ],
