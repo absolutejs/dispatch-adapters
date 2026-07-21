@@ -3,12 +3,18 @@ import { Type } from "@sinclair/typebox";
 import type { CreateResendAdapterOptions } from "./index";
 
 export const manifest = defineManifest<CreateResendAdapterOptions>()({
-  contract: 1,
+  contract: 2,
+  discovery: {
+    audiences: ["agent-hosts", "application-developers"],
+    intents: ["send transactional email", "execute installed email effects"],
+    keywords: ["email", "resend", "idempotency", "effect-adapter"],
+    protocols: ["HTTPS"],
+  },
   identity: {
     accent: "#111827",
     category: "messaging",
     description:
-      "Resend-backed `EmailAdapter` for `@absolutejs/dispatch`. Takes your Resend client; emits standard DispatchResult with the Resend message id.",
+      "Resend-backed EmailAdapter and credential-safe installed effect driver with stable provider idempotency.",
     docsUrl: "https://github.com/absolutejs/dispatch-adapters/tree/main/resend",
     name: "@absolutejs/dispatch-resend",
     tagline: "Deliver your site’s email with Resend.",
@@ -54,6 +60,37 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
           {
             from: "@absolutejs/dispatch-resend",
             names: ["createResendAdapter"],
+          },
+          { from: "resend", names: ["Resend"] },
+        ],
+      },
+    }),
+    defineImplementation<Record<string, never>>()({
+      contract: "execution/effect-adapter-driver",
+      factory: "createResendEffectAdapterDriver",
+      from: "@absolutejs/dispatch-resend",
+      requires: {
+        peers: [
+          {
+            name: "@absolutejs/execution",
+            range: "^0.6.1",
+            reason: "Credential-safe installed effect execution",
+          },
+          {
+            name: "resend",
+            range: ">=4.0.0",
+            reason: "Resend SDK client",
+          },
+        ],
+      },
+      settings: Type.Object({}),
+      title: "Resend installed effect driver",
+      wiring: {
+        code: "createResendEffectAdapterDriver((apiKey) => new Resend(apiKey))",
+        imports: [
+          {
+            from: "@absolutejs/dispatch-resend",
+            names: ["createResendEffectAdapterDriver"],
           },
           { from: "resend", names: ["Resend"] },
         ],

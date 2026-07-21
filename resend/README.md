@@ -86,3 +86,9 @@ Resend's `{ data, error }` response shape becomes:
 [Apache 2.0](../LICENSE). Tier B substrate-adjacent under the
 AbsoluteJS licensing policy — rides `@absolutejs/dispatch` (BSL Tier
 A) and `resend` (MIT).
+The package also exports `resendEffectAdapterDescriptor` and
+`createResendEffectAdapterDriver()` for `@absolutejs/execution`. The driver
+accepts resolved credentials only in its execution context, requires the exact
+Resend API destination and `email.send` effect, and forwards the durable effect
+idempotency key to Resend. Hosts retain ownership of secret storage and provide
+the narrow `clientForKey` factory at the final provider boundary.

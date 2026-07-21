@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { createDispatcher } from "@absolutejs/dispatch";
+import type { EffectAdapterDriverContext } from "@absolutejs/execution";
 import { Resend } from "resend";
-import { createResendAdapter, type ResendClientLike } from "../src/index";
+import {
+  createResendAdapter,
+  createResendEffectAdapterDriver,
+  RESEND_EFFECT_API_DESTINATION,
+  RESEND_EMAIL_EFFECT,
+  type ResendClientLike,
+} from "../src/index";
 
 /**
  * Mock Resend client. Captures every `emails.send` call so we can
@@ -34,6 +41,29 @@ const makeMockResend = () => {
     },
   };
 };
+
+const effectContext = (
+  value = "project-resend-secret",
+): EffectAdapterDriverContext => ({
+  actionId: "action-a",
+  credentials: [
+    {
+      adapterAlias: "RESEND_API_KEY",
+      destination: RESEND_EFFECT_API_DESTINATION,
+      mode: "provider-sdk",
+      secretAlias: "PROJECT_RESEND_API_KEY",
+      value,
+    },
+  ],
+  destination: RESEND_EFFECT_API_DESTINATION,
+  effect: RESEND_EMAIL_EFFECT,
+  effectId: "effect-a",
+  idempotencyKey: "tenant-a:effect-a",
+  inputDigest: "sha256:input",
+  installationId: "installation-a",
+  signal: new AbortController().signal,
+  tenantId: "tenant-a",
+});
 
 describe("createResendAdapter", () => {
   test("accepts the current real Resend client type", () => {
@@ -244,5 +274,46 @@ describe("createResendAdapter", () => {
     });
     expect(result.id).toBeUndefined();
     expect(result.provider).toBe("resend");
+  });
+});
+
+describe("createResendEffectAdapterDriver", () => {
+  test("uses the resolved key and stable effect idempotency key", async () => {
+    const mock = makeMockResend();
+    const keys: string[] = [];
+    const driver = createResendEffectAdapterDriver((key) => {
+      keys.push(key);
+      return mock.client;
+    });
+    const result = await driver.execute(
+      {
+        from: "sender@example.com",
+        subject: "Hello",
+        text: "Body",
+        to: "recipient@example.com",
+      },
+      effectContext(),
+    );
+
+    expect(keys).toEqual(["project-resend-secret"]);
+    expect(mock.options).toEqual([{ idempotencyKey: "tenant-a:effect-a" }]);
+    expect(result).toMatchObject({ id: "resend-msg-1", provider: "resend" });
+    expect(JSON.stringify(result)).not.toContain("project-resend-secret");
+  });
+
+  test("rejects invalid input before constructing a provider client", async () => {
+    let clients = 0;
+    const driver = createResendEffectAdapterDriver(() => {
+      clients += 1;
+      throw new Error("provider client should not be created");
+    });
+
+    await expect(
+      driver.execute(
+        { from: "sender@example.com", subject: "", to: [] },
+        effectContext(),
+      ),
+    ).rejects.toThrow("require recipients");
+    expect(clients).toBe(0);
   });
 });

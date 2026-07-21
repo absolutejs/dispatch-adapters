@@ -1,7 +1,7 @@
 {
   "name": "@absolutejs/dispatch-resend",
-  "version": "0.0.4",
-  "description": "Resend-backed EmailAdapter for @absolutejs/dispatch. Takes your Resend client; emits standard DispatchResult with the Resend message id.",
+  "version": "0.1.0",
+  "description": "Resend-backed EmailAdapter and credential-safe installed effect driver for AbsoluteJS.",
   "repository": {
     "type": "git",
     "url": "https://github.com/absolutejs/dispatch-adapters.git",
@@ -28,7 +28,7 @@
     "transactional"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external resend && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external @absolutejs/execution --external resend && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
@@ -36,10 +36,12 @@
   },
   "peerDependencies": {
     "@absolutejs/dispatch": ">= 0.0.1",
+    "@absolutejs/execution": ">= 0.6.1 < 0.7.0",
     "resend": ">= 4.0.0"
   },
   "devDependencies": {
     "@absolutejs/dispatch": "^0.0.5",
+    "@absolutejs/execution": "^0.6.1",
     "@types/bun": "1.3.14",
     "prettier": "3.5.3",
     "resend": "^4.5.0",
@@ -63,10 +65,10 @@
     "README.md"
   ],
   "absolutejs": {
-    "manifestContract": 1
+    "manifestContract": 2
   },
   "dependencies": {
-    "@absolutejs/manifest": "^0.1.0",
+    "@absolutejs/manifest": "^0.3.0",
     "@sinclair/typebox": "^0.34.0"
   }
 }

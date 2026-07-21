@@ -11,7 +11,47 @@
  * captures them on the `dispatch.email.send` span, bumps the failed
  * counter, emits the `dispatch.email.failed` audit event, and re-throws.
  */
-import type { EmailAdapter, EmailMessage } from "@absolutejs/dispatch";
+import type {
+  DispatchResult,
+  EmailAdapter,
+  EmailMessage,
+} from "@absolutejs/dispatch";
+import type {
+  EffectAdapterDescriptor,
+  EffectAdapterDriver,
+  EffectAdapterDriverContext,
+} from "@absolutejs/execution";
+
+export const RESEND_EFFECT_ADAPTER_ID = "absolutejs.dispatch-resend";
+export const RESEND_EFFECT_API_DESTINATION = "https://api.resend.com";
+export const RESEND_EMAIL_EFFECT = "email.send";
+
+export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
+  adapterId: RESEND_EFFECT_ADAPTER_ID,
+  compensation: { supported: false },
+  credentialBindings: [
+    {
+      alias: "RESEND_API_KEY",
+      destination: RESEND_EFFECT_API_DESTINATION,
+      mode: "provider-sdk",
+    },
+  ],
+  destinations: [
+    { kind: "https-origin", value: RESEND_EFFECT_API_DESTINATION },
+  ],
+  effects: [RESEND_EMAIL_EFFECT],
+  idempotency: { scope: "tenant-effect", supported: true },
+  reconciliation: { mode: "manual" },
+  spendAuthority: {
+    canSpend: false,
+    currencies: [],
+    requiresMandate: false,
+  },
+  title: "Resend transactional email",
+  version: "0.1.0",
+};
+
+export class ResendEffectInputError extends Error {}
 
 /**
  * Minimal subset of Resend's `Resend` client we use. Declaring it
@@ -152,3 +192,61 @@ export const createResendAdapter = (
     },
   };
 };
+
+const validateEffectMessage = (message: EmailMessage) => {
+  const recipients =
+    typeof message.to === "string" ? [message.to] : [...message.to];
+  if (
+    recipients.length === 0 ||
+    recipients.some((recipient) => !recipient.trim()) ||
+    !message.from?.trim() ||
+    !message.subject.trim() ||
+    (message.text === undefined && message.html === undefined)
+  )
+    throw new ResendEffectInputError(
+      "Resend effects require recipients, a sender, a subject, and text or HTML content",
+    );
+};
+
+const effectApiKey = (context: EffectAdapterDriverContext) => {
+  const credential = context.credentials.find(
+    (candidate) =>
+      candidate.adapterAlias === "RESEND_API_KEY" &&
+      candidate.destination === RESEND_EFFECT_API_DESTINATION &&
+      candidate.mode === "provider-sdk",
+  );
+  if (!credential)
+    throw new ResendEffectInputError("Resend API key binding is unavailable");
+
+  return credential.value;
+};
+
+export const createResendEffectAdapterDriver = (
+  clientForKey: (value: string) => ResendClientLike,
+): EffectAdapterDriver<EmailMessage, DispatchResult> => ({
+  adapterId: RESEND_EFFECT_ADAPTER_ID,
+  capabilities: {
+    compensation: false,
+    idempotency: true,
+    reconciliation: "manual",
+  },
+  execute: async (message, context) => {
+    if (
+      context.effect !== RESEND_EMAIL_EFFECT ||
+      context.destination !== RESEND_EFFECT_API_DESTINATION
+    )
+      throw new ResendEffectInputError(
+        "Resend execution context is outside the adapter contract",
+      );
+    validateEffectMessage(message);
+
+    return createResendAdapter({
+      client: clientForKey(effectApiKey(context)),
+    }).send({
+      ...message,
+      idempotencyKey: context.idempotencyKey,
+      tenant: context.tenantId,
+    });
+  },
+  version: resendEffectAdapterDescriptor.version,
+});
