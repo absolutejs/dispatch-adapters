@@ -105,6 +105,16 @@ body, Standard Webhooks headers, project tenant ID, and that project's exact
 verifier before returning a normalized `EffectEvidenceRecord`; recipients,
 sender, subject, headers, and the raw payload are never returned for storage.
 
+The descriptor uses `webhook-query`: signed webhooks remain primary, while
+`createResendEffectQueryDriver()` can retrieve an ambiguous send only when
+Execution retained the exact Resend email ID returned by the original call.
+The execution driver extracts that bounded reference without retaining the
+provider response. The query fallback verifies the retrieved email ID and its
+`abs_effect` tag before returning normalized evidence. If an ambiguous network
+call returned no ID, the runtime skips this fallback before resolving the API
+key and continues waiting for signed webhook or operator evidence; it never
+replays the send.
+
 All supported outbound `email.*` webhook events confirm that the `email.send`
 effect was accepted by Resend, so the normalized effect outcome is
 `confirmed_succeeded`. Delivery state remains explicit in `eventType` (for

@@ -20,6 +20,7 @@ import type {
   EffectAdapterDescriptor,
   EffectAdapterDriver,
   EffectAdapterDriverContext,
+  EffectAdapterQueryDriver,
   EffectEvidenceRecord,
 } from "@absolutejs/execution";
 import { Resend, type WebhookEventPayload } from "resend";
@@ -58,7 +59,19 @@ export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
   effects: [RESEND_EMAIL_EFFECT],
   idempotency: { scope: "tenant-effect", supported: true },
   reconciliation: {
-    mode: "webhook",
+    mode: "webhook-query",
+    query: {
+      credentialAlias: "RESEND_API_KEY",
+      health: {
+        staleAfterMs: 900_000,
+        strategy: "last-successful-query",
+      },
+      pollingIntervalMs: 60_000,
+      provider: "resend",
+      requiresReference: true,
+      rotation: { mode: "replace", verification: "successful-query" },
+      supportedOutcomes: ["confirmed_succeeded"],
+    },
     webhook: {
       callback: {
         body: "raw",
@@ -82,7 +95,7 @@ export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
     requiresMandate: false,
   },
   title: "Resend transactional email",
-  version: "0.4.0",
+  version: "0.5.0",
 };
 
 export class ResendEffectInputError extends Error {}
@@ -112,6 +125,20 @@ export type ResendClientLike = {
       params: ResendEmailParams,
       options?: { idempotencyKey?: string },
     ) => Promise<{ data?: { id?: string } | null; error?: unknown }>;
+  };
+};
+
+export type ResendQueryClientLike = {
+  emails: {
+    get: (id: string) => Promise<{
+      data?: {
+        created_at: string;
+        id: string;
+        last_event: string;
+        tags?: Array<{ name: string; value: string }>;
+      } | null;
+      error?: unknown;
+    }>;
   };
 };
 
@@ -354,7 +381,7 @@ export const createResendEffectAdapterDriver = (
   capabilities: {
     compensation: false,
     idempotency: true,
-    reconciliation: "webhook",
+    reconciliation: "webhook-query",
   },
   execute: async (message, context) => {
     if (
@@ -377,6 +404,83 @@ export const createResendEffectAdapterDriver = (
       },
       tenant: context.tenantId,
     });
+  },
+  reconciliationReference: (output) =>
+    output.id ? { provider: "resend", resourceId: output.id } : undefined,
+  version: resendEffectAdapterDescriptor.version,
+});
+
+const resendQueryApiKey = (
+  credential: Parameters<EffectAdapterQueryDriver["query"]>[1]["credential"],
+) => {
+  if (
+    credential.adapterAlias !== "RESEND_API_KEY" ||
+    credential.destination !== RESEND_EFFECT_API_DESTINATION ||
+    credential.mode !== "provider-sdk"
+  )
+    throw new ResendEffectInputError(
+      "Resend query API key binding is unavailable",
+    );
+  return credential.value;
+};
+
+const responseError = (error: unknown) =>
+  record(error) && typeof error.message === "string"
+    ? error.message
+    : "Resend email query failed";
+
+export const createResendEffectQueryDriver = (
+  clientForKey: (value: string) => ResendQueryClientLike,
+): EffectAdapterQueryDriver => ({
+  adapterId: RESEND_EFFECT_ADAPTER_ID,
+  provider: "resend",
+  query: async (effect, context) => {
+    const reference = effect.reconciliationReference;
+    if (
+      !reference ||
+      reference.adapterId !== RESEND_EFFECT_ADAPTER_ID ||
+      reference.provider !== "resend"
+    )
+      throw new ResendEffectInputError(
+        "Resend query requires its exact retained email reference",
+      );
+    if (context.signal.aborted)
+      throw new ResendEffectInputError("Resend query was aborted");
+    const response = await clientForKey(
+      resendQueryApiKey(context.credential),
+    ).emails.get(reference.resourceId);
+    if (context.signal.aborted)
+      throw new ResendEffectInputError("Resend query was aborted");
+    if (response.error !== undefined && response.error !== null)
+      throw new ResendEffectInputError(responseError(response.error));
+    const data = response.data;
+    if (!data || data.id !== reference.resourceId)
+      throw new ResendEffectInputError(
+        "Resend query response differs from the retained email reference",
+      );
+    const effectTag = data.tags?.find(
+      ({ name }) => name === RESEND_EFFECT_ID_TAG,
+    );
+    if (effectTag?.value !== effect.effectId)
+      throw new ResendEffectInputError(
+        "Resend query response is not bound to the exact effect",
+      );
+    const occurredAt = Date.parse(data.created_at);
+    if (!Number.isFinite(occurredAt) || !data.last_event.trim())
+      throw new ResendEffectInputError(
+        "Resend query response has invalid lifecycle evidence",
+      );
+
+    return {
+      deliveryId: `query:${data.id}:${data.last_event}`,
+      eventType: `email.${data.last_event}`,
+      evidenceReference: `resend:query:${data.id}:${data.last_event}`,
+      occurredAt,
+      outcome: "confirmed_succeeded",
+      providerResourceId: data.id,
+      status: "resolved",
+      verifier: "resend-sdk@6:get-email",
+    };
   },
   version: resendEffectAdapterDescriptor.version,
 });

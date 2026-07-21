@@ -10,6 +10,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
       "send transactional email",
       "execute installed email effects",
       "verify effect webhook evidence",
+      "query ambiguous email effects by retained provider id",
     ],
     keywords: [
       "email",
@@ -25,7 +26,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
     accent: "#111827",
     category: "messaging",
     description:
-      "Resend-backed EmailAdapter and credential-safe installed effect driver with stable idempotency and signed webhook evidence.",
+      "Resend-backed EmailAdapter and credential-safe installed effect driver with stable idempotency, signed webhook evidence, and reference-gated provider query recovery.",
     docsUrl: "https://github.com/absolutejs/dispatch-adapters/tree/main/resend",
     name: "@absolutejs/dispatch-resend",
     tagline: "Deliver your site’s email with Resend.",
@@ -84,7 +85,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "@absolutejs/execution",
-            range: ">=0.8.0 <0.9.0",
+            range: ">=0.11.0 <0.12.0",
             reason: "Credential-safe installed effect execution",
           },
           {
@@ -102,6 +103,37 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
           {
             from: "@absolutejs/dispatch-resend",
             names: ["createResendEffectAdapterDriver"],
+          },
+          { from: "resend", names: ["Resend"] },
+        ],
+      },
+    }),
+    defineImplementation<Record<string, never>>()({
+      contract: "execution/effect-adapter-query-driver",
+      factory: "createResendEffectQueryDriver",
+      from: "@absolutejs/dispatch-resend",
+      requires: {
+        peers: [
+          {
+            name: "@absolutejs/execution",
+            range: ">=0.11.0 <0.12.0",
+            reason: "Reference-gated provider query reconciliation",
+          },
+          {
+            name: "resend",
+            range: ">=6.18.0",
+            reason: "Resend SDK client",
+          },
+        ],
+      },
+      settings: Type.Object({}),
+      title: "Resend effect query fallback",
+      wiring: {
+        code: "createResendEffectQueryDriver((apiKey) => new Resend(apiKey))",
+        imports: [
+          {
+            from: "@absolutejs/dispatch-resend",
+            names: ["createResendEffectQueryDriver"],
           },
           { from: "resend", names: ["Resend"] },
         ],

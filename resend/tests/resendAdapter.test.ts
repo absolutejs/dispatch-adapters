@@ -6,6 +6,7 @@ import { Webhook } from "standardwebhooks";
 import {
   createResendAdapter,
   createResendEffectAdapterDriver,
+  createResendEffectQueryDriver,
   resendEffectAdapterDescriptor,
   RESEND_EFFECT_API_DESTINATION,
   RESEND_EFFECT_ID_TAG,
@@ -14,6 +15,7 @@ import {
   RESEND_WEBHOOK_SECRET_ALIAS,
   verifyResendEffectWebhook,
   type ResendClientLike,
+  type ResendQueryClientLike,
 } from "../src/index";
 
 /**
@@ -289,9 +291,21 @@ describe("createResendAdapter", () => {
 describe("createResendEffectAdapterDriver", () => {
   test("declares complete provider-neutral webhook setup", () => {
     const { reconciliation } = resendEffectAdapterDescriptor;
-    expect(reconciliation.mode).toBe("webhook");
-    if (reconciliation.mode !== "webhook")
-      throw new Error("Expected webhook reconciliation");
+    expect(reconciliation.mode).toBe("webhook-query");
+    if (reconciliation.mode !== "webhook-query")
+      throw new Error("Expected webhook-query reconciliation");
+    expect(reconciliation.query).toEqual({
+      credentialAlias: "RESEND_API_KEY",
+      health: {
+        staleAfterMs: 900_000,
+        strategy: "last-successful-query",
+      },
+      pollingIntervalMs: 60_000,
+      provider: "resend",
+      requiresReference: true,
+      rotation: { mode: "replace", verification: "successful-query" },
+      supportedOutcomes: ["confirmed_succeeded"],
+    });
     expect(reconciliation.webhook).toEqual({
       callback: {
         body: "raw",
@@ -334,6 +348,10 @@ describe("createResendEffectAdapterDriver", () => {
       value: "effect-a",
     });
     expect(result).toMatchObject({ id: "resend-msg-1", provider: "resend" });
+    expect(driver.reconciliationReference?.(result, effectContext())).toEqual({
+      provider: "resend",
+      resourceId: "resend-msg-1",
+    });
     expect(JSON.stringify(result)).not.toContain("project-resend-secret");
   });
 
@@ -350,6 +368,108 @@ describe("createResendEffectAdapterDriver", () => {
         effectContext(),
       ),
     ).rejects.toThrow("require recipients");
+    expect(clients).toBe(0);
+  });
+});
+
+describe("createResendEffectQueryDriver", () => {
+  const queryContext = () => ({
+    credential: {
+      adapterAlias: "RESEND_API_KEY",
+      destination: RESEND_EFFECT_API_DESTINATION,
+      mode: "provider-sdk" as const,
+      secretAlias: "PROJECT_RESEND_API_KEY",
+      value: "project-resend-secret",
+    },
+    installationId: "installation-a",
+    signal: new AbortController().signal,
+    tenantId: "tenant-a",
+  });
+  const queryEffect = () => ({
+    effectId: "effect-a",
+    idempotencyKey: "tenant-a:effect-a",
+    inputDigest: "sha256:input",
+    reconciliationReference: {
+      adapterId: resendEffectAdapterDescriptor.adapterId,
+      provider: "resend",
+      resourceId: "email-a",
+    },
+  });
+
+  test("accepts the current real Resend query client type", () => {
+    expect(
+      createResendEffectQueryDriver((key) => new Resend(key)).provider,
+    ).toBe("resend");
+  });
+
+  test("retrieves the exact email and returns normalized bound evidence", async () => {
+    const keys: string[] = [];
+    const ids: string[] = [];
+    const client: ResendQueryClientLike = {
+      emails: {
+        get: async (id) => {
+          ids.push(id);
+          return {
+            data: {
+              created_at: "2026-07-21T12:00:00.000Z",
+              id,
+              last_event: "delivered",
+              tags: [{ name: RESEND_EFFECT_ID_TAG, value: "effect-a" }],
+            },
+          };
+        },
+      },
+    };
+    const driver = createResendEffectQueryDriver((key) => {
+      keys.push(key);
+      return client;
+    });
+
+    await expect(driver.query(queryEffect(), queryContext())).resolves.toEqual({
+      deliveryId: "query:email-a:delivered",
+      eventType: "email.delivered",
+      evidenceReference: "resend:query:email-a:delivered",
+      occurredAt: Date.parse("2026-07-21T12:00:00.000Z"),
+      outcome: "confirmed_succeeded",
+      providerResourceId: "email-a",
+      status: "resolved",
+      verifier: "resend-sdk@6:get-email",
+    });
+    expect(keys).toEqual(["project-resend-secret"]);
+    expect(ids).toEqual(["email-a"]);
+  });
+
+  test("rejects a provider response rebound to another effect", async () => {
+    const driver = createResendEffectQueryDriver(() => ({
+      emails: {
+        get: async (id) => ({
+          data: {
+            created_at: "2026-07-21T12:00:00.000Z",
+            id,
+            last_event: "delivered",
+            tags: [{ name: RESEND_EFFECT_ID_TAG, value: "effect-b" }],
+          },
+        }),
+      },
+    }));
+
+    await expect(driver.query(queryEffect(), queryContext())).rejects.toThrow(
+      "exact effect",
+    );
+  });
+
+  test("requires a retained reference before constructing a provider client", async () => {
+    let clients = 0;
+    const driver = createResendEffectQueryDriver(() => {
+      clients += 1;
+      throw new Error("provider client should not be created");
+    });
+    const { reconciliationReference, ...withoutReference } = queryEffect();
+    void reconciliationReference;
+
+    await expect(
+      driver.query(withoutReference, queryContext()),
+    ).rejects.toThrow("exact retained email reference");
     expect(clients).toBe(0);
   });
 });
