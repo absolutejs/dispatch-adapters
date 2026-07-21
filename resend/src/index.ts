@@ -29,6 +29,18 @@ export const RESEND_EFFECT_API_DESTINATION = "https://api.resend.com";
 export const RESEND_EMAIL_EFFECT = "email.send";
 export const RESEND_EFFECT_ID_TAG = "abs_effect";
 export const RESEND_WEBHOOK_SECRET_ALIAS = "RESEND_WEBHOOK_SECRET";
+export const RESEND_EFFECT_WEBHOOK_EVENTS = [
+  "email.sent",
+  "email.scheduled",
+  "email.delivered",
+  "email.delivery_delayed",
+  "email.complained",
+  "email.bounced",
+  "email.opened",
+  "email.clicked",
+  "email.failed",
+  "email.suppressed",
+] as const;
 
 export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
   adapterId: RESEND_EFFECT_ADAPTER_ID,
@@ -45,14 +57,32 @@ export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
   ],
   effects: [RESEND_EMAIL_EFFECT],
   idempotency: { scope: "tenant-effect", supported: true },
-  reconciliation: { mode: "webhook" },
+  reconciliation: {
+    mode: "webhook",
+    webhook: {
+      callback: {
+        body: "raw",
+        mediaType: "application/json",
+        method: "POST",
+        pathTemplate: "/api/webhooks/agent-effects/{tenantId}/resend",
+        signatureHeaders: ["svix-id", "svix-timestamp", "svix-signature"],
+      },
+      events: RESEND_EFFECT_WEBHOOK_EVENTS,
+      health: { strategy: "last-verified-event" },
+      provider: "resend",
+      secret: {
+        alias: RESEND_WEBHOOK_SECRET_ALIAS,
+        rotation: { mode: "replace", verification: "signed-event" },
+      },
+    },
+  },
   spendAuthority: {
     canSpend: false,
     currencies: [],
     requiresMandate: false,
   },
   title: "Resend transactional email",
-  version: "0.2.1",
+  version: "0.3.0",
 };
 
 export class ResendEffectInputError extends Error {}

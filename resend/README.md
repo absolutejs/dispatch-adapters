@@ -96,7 +96,10 @@ the narrow `clientForKey` factory at the final provider boundary.
 ## Durable effect webhook evidence
 
 The effect driver adds an `abs_effect` Resend tag containing the durable effect
-ID and declares webhook reconciliation. Hosts can pass the exact raw request
+ID and declares its complete webhook setup: callback template, Standard
+Webhooks headers, supported outbound events, exact secret alias,
+last-verified-event health signal, and signed-event replacement rotation.
+Hosts can pass the exact raw request
 body, Standard Webhooks headers, project tenant ID, and that project's exact
 `RESEND_WEBHOOK_SECRET` to `verifyResendEffectWebhook()`. It uses Resend's SDK
 verifier before returning a normalized `EffectEvidenceRecord`; recipients,

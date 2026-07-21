@@ -6,9 +6,12 @@ import { Webhook } from "standardwebhooks";
 import {
   createResendAdapter,
   createResendEffectAdapterDriver,
+  resendEffectAdapterDescriptor,
   RESEND_EFFECT_API_DESTINATION,
   RESEND_EFFECT_ID_TAG,
+  RESEND_EFFECT_WEBHOOK_EVENTS,
   RESEND_EMAIL_EFFECT,
+  RESEND_WEBHOOK_SECRET_ALIAS,
   verifyResendEffectWebhook,
   type ResendClientLike,
 } from "../src/index";
@@ -284,6 +287,29 @@ describe("createResendAdapter", () => {
 });
 
 describe("createResendEffectAdapterDriver", () => {
+  test("declares complete provider-neutral webhook setup", () => {
+    const { reconciliation } = resendEffectAdapterDescriptor;
+    expect(reconciliation.mode).toBe("webhook");
+    if (reconciliation.mode !== "webhook")
+      throw new Error("Expected webhook reconciliation");
+    expect(reconciliation.webhook).toEqual({
+      callback: {
+        body: "raw",
+        mediaType: "application/json",
+        method: "POST",
+        pathTemplate: "/api/webhooks/agent-effects/{tenantId}/resend",
+        signatureHeaders: ["svix-id", "svix-timestamp", "svix-signature"],
+      },
+      events: RESEND_EFFECT_WEBHOOK_EVENTS,
+      health: { strategy: "last-verified-event" },
+      provider: "resend",
+      secret: {
+        alias: RESEND_WEBHOOK_SECRET_ALIAS,
+        rotation: { mode: "replace", verification: "signed-event" },
+      },
+    });
+  });
+
   test("uses the resolved key and stable effect idempotency key", async () => {
     const mock = makeMockResend();
     const keys: string[] = [];
