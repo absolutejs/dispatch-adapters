@@ -73,7 +73,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "@absolutejs/execution",
-            range: "^0.6.1",
+            range: "^0.6.2",
             reason: "Credential-safe installed effect execution",
           },
           {
