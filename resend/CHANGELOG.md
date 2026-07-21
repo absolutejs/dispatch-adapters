@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0] — 2026-07-21
+
+- Upgrade to `@absolutejs/execution` 0.8 and Resend 6.18.
+- Correlate durable sends with a protected `abs_effect` provider tag.
+- Verify exact raw webhook bodies through the Resend SDK and normalize them to
+  privacy-minimal, tenant-bound effect evidence.
+- Declare webhook reconciliation while retaining provider idempotency.
+
 ## [0.0.3] — 2026-07-14
 
 - Make `ResendClientLike` structurally compatible with the current Resend SDK

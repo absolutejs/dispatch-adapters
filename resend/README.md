@@ -92,3 +92,24 @@ accepts resolved credentials only in its execution context, requires the exact
 Resend API destination and `email.send` effect, and forwards the durable effect
 idempotency key to Resend. Hosts retain ownership of secret storage and provide
 the narrow `clientForKey` factory at the final provider boundary.
+
+## Durable effect webhook evidence
+
+The effect driver adds an `abs_effect` Resend tag containing the durable effect
+ID and declares webhook reconciliation. Hosts can pass the exact raw request
+body, Standard Webhooks headers, project tenant ID, and that project's exact
+`RESEND_WEBHOOK_SECRET` to `verifyResendEffectWebhook()`. It uses Resend's SDK
+verifier before returning a normalized `EffectEvidenceRecord`; recipients,
+sender, subject, headers, and the raw payload are never returned for storage.
+
+All supported outbound `email.*` webhook events confirm that the `email.send`
+effect was accepted by Resend, so the normalized effect outcome is
+`confirmed_succeeded`. Delivery state remains explicit in `eventType` (for
+example `email.delivered`, `email.bounced`, or `email.failed`) and must not be
+confused with successful inbox delivery. Inbound `email.received`, contact,
+domain, uncorrelated, and invalidly signed events are rejected.
+
+Webhook signing secrets are host ingress credentials, not provider-send
+credentials. Store one under the exact project secret alias
+`RESEND_WEBHOOK_SECRET`; do not place it in an adapter installation or resolve
+it during email sends.

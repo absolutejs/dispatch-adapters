@@ -20,11 +20,15 @@ import type {
   EffectAdapterDescriptor,
   EffectAdapterDriver,
   EffectAdapterDriverContext,
+  EffectEvidenceRecord,
 } from "@absolutejs/execution";
+import { Resend, type WebhookEventPayload } from "resend";
 
 export const RESEND_EFFECT_ADAPTER_ID = "absolutejs.dispatch-resend";
 export const RESEND_EFFECT_API_DESTINATION = "https://api.resend.com";
 export const RESEND_EMAIL_EFFECT = "email.send";
+export const RESEND_EFFECT_ID_TAG = "abs_effect";
+export const RESEND_WEBHOOK_SECRET_ALIAS = "RESEND_WEBHOOK_SECRET";
 
 export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
   adapterId: RESEND_EFFECT_ADAPTER_ID,
@@ -41,14 +45,14 @@ export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
   ],
   effects: [RESEND_EMAIL_EFFECT],
   idempotency: { scope: "tenant-effect", supported: true },
-  reconciliation: { mode: "manual" },
+  reconciliation: { mode: "webhook" },
   spendAuthority: {
     canSpend: false,
     currencies: [],
     requiresMandate: false,
   },
   title: "Resend transactional email",
-  version: "0.1.2",
+  version: "0.2.0",
 };
 
 export class ResendEffectInputError extends Error {}
@@ -208,6 +212,96 @@ const validateEffectMessage = (message: EmailMessage) => {
     );
 };
 
+const validateEffectId = (effectId: string) => {
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(effectId))
+    throw new ResendEffectInputError(
+      "Resend effect IDs must fit the provider tag contract",
+    );
+  return effectId;
+};
+
+export type ResendWebhookHeaders = {
+  id: string;
+  signature: string;
+  timestamp: string;
+};
+
+export type VerifyResendEffectWebhookInput = {
+  headers: ResendWebhookHeaders;
+  payload: string;
+  receivedAt?: number;
+  tenantId: string;
+  webhookSecret: string;
+};
+
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+export const normalizeResendEffectWebhook = (input: {
+  deliveryId: string;
+  event: WebhookEventPayload;
+  receivedAt: number;
+  tenantId: string;
+}): EffectEvidenceRecord => {
+  if (
+    !input.event.type.startsWith("email.") ||
+    input.event.type === "email.received"
+  )
+    throw new ResendEffectInputError(
+      "Resend webhook is not an outbound email effect event",
+    );
+
+  const data: unknown = input.event.data;
+  if (!record(data) || typeof data.email_id !== "string" || !record(data.tags))
+    throw new ResendEffectInputError(
+      "Resend webhook is missing outbound email evidence",
+    );
+  const effectId = data.tags[RESEND_EFFECT_ID_TAG];
+  if (typeof effectId !== "string")
+    throw new ResendEffectInputError(
+      `Resend webhook is missing the ${RESEND_EFFECT_ID_TAG} correlation tag`,
+    );
+
+  const occurredAt = Date.parse(input.event.created_at);
+  if (!Number.isFinite(occurredAt))
+    throw new ResendEffectInputError(
+      "Resend webhook has an invalid occurrence timestamp",
+    );
+
+  return {
+    deliveryId: input.deliveryId,
+    effectId: validateEffectId(effectId),
+    eventType: input.event.type,
+    evidenceReference: `resend:webhook:${input.deliveryId}`,
+    occurredAt,
+    outcome: "confirmed_succeeded",
+    provider: "resend",
+    providerResourceId: data.email_id,
+    receivedAt: input.receivedAt,
+    tenantId: input.tenantId,
+    verifier: "resend-sdk@6",
+  };
+};
+
+/** Verifies the exact raw body with Resend before returning normalized evidence. */
+export const verifyResendEffectWebhook = (
+  input: VerifyResendEffectWebhookInput,
+): EffectEvidenceRecord => {
+  // Resend's constructor requires an API-key-shaped value even though its
+  // local webhook verifier never performs an API request or reads the key.
+  const event = new Resend("re_local_webhook_verifier").webhooks.verify({
+    headers: input.headers,
+    payload: input.payload,
+    webhookSecret: input.webhookSecret,
+  });
+  return normalizeResendEffectWebhook({
+    deliveryId: input.headers.id,
+    event,
+    receivedAt: input.receivedAt ?? Date.now(),
+    tenantId: input.tenantId,
+  });
+};
+
 const effectApiKey = (context: EffectAdapterDriverContext) => {
   const credential = context.credentials.find(
     (candidate) =>
@@ -228,7 +322,7 @@ export const createResendEffectAdapterDriver = (
   capabilities: {
     compensation: false,
     idempotency: true,
-    reconciliation: "manual",
+    reconciliation: "webhook",
   },
   execute: async (message, context) => {
     if (
@@ -245,6 +339,10 @@ export const createResendEffectAdapterDriver = (
     }).send({
       ...message,
       idempotencyKey: context.idempotencyKey,
+      metadata: {
+        ...message.metadata,
+        [RESEND_EFFECT_ID_TAG]: validateEffectId(context.effectId),
+      },
       tenant: context.tenantId,
     });
   },

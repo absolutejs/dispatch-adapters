@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { createDispatcher } from "@absolutejs/dispatch";
 import type { EffectAdapterDriverContext } from "@absolutejs/execution";
 import { Resend } from "resend";
+import { Webhook } from "standardwebhooks";
 import {
   createResendAdapter,
   createResendEffectAdapterDriver,
   RESEND_EFFECT_API_DESTINATION,
+  RESEND_EFFECT_ID_TAG,
   RESEND_EMAIL_EFFECT,
+  verifyResendEffectWebhook,
   type ResendClientLike,
 } from "../src/index";
 
@@ -297,6 +300,10 @@ describe("createResendEffectAdapterDriver", () => {
 
     expect(keys).toEqual(["project-resend-secret"]);
     expect(mock.options).toEqual([{ idempotencyKey: "tenant-a:effect-a" }]);
+    expect(mock.calls[0]!.tags).toContainEqual({
+      name: RESEND_EFFECT_ID_TAG,
+      value: "effect-a",
+    });
     expect(result).toMatchObject({ id: "resend-msg-1", provider: "resend" });
     expect(JSON.stringify(result)).not.toContain("project-resend-secret");
   });
@@ -315,5 +322,68 @@ describe("createResendEffectAdapterDriver", () => {
       ),
     ).rejects.toThrow("require recipients");
     expect(clients).toBe(0);
+  });
+});
+
+describe("verifyResendEffectWebhook", () => {
+  test("verifies the raw body and returns only normalized effect evidence", () => {
+    const secret = `whsec_${Buffer.from("0123456789abcdef0123456789abcdef").toString("base64")}`;
+    const payload = JSON.stringify({
+      created_at: "2026-07-21T12:00:00.000Z",
+      data: {
+        created_at: "2026-07-21T12:00:00.000Z",
+        email_id: "email-a",
+        from: "private-sender@example.com",
+        subject: "Private subject",
+        tags: { [RESEND_EFFECT_ID_TAG]: "effect-a" },
+        to: ["private-recipient@example.com"],
+      },
+      type: "email.delivered",
+    });
+    const id = "msg_test_delivery";
+    const timestamp = new Date();
+    const signature = new Webhook(secret).sign(id, timestamp, payload);
+    const evidence = verifyResendEffectWebhook({
+      headers: {
+        id,
+        signature,
+        timestamp: String(Math.floor(timestamp.getTime() / 1000)),
+      },
+      payload,
+      receivedAt: 2,
+      tenantId: "tenant-a",
+      webhookSecret: secret,
+    });
+
+    expect(evidence).toEqual({
+      deliveryId: id,
+      effectId: "effect-a",
+      eventType: "email.delivered",
+      evidenceReference: `resend:webhook:${id}`,
+      occurredAt: Date.parse("2026-07-21T12:00:00.000Z"),
+      outcome: "confirmed_succeeded",
+      provider: "resend",
+      providerResourceId: "email-a",
+      receivedAt: 2,
+      tenantId: "tenant-a",
+      verifier: "resend-sdk@6",
+    });
+    expect(JSON.stringify(evidence)).not.toContain("Private");
+    expect(JSON.stringify(evidence)).not.toContain("recipient");
+  });
+
+  test("rejects an invalid signature", () => {
+    expect(() =>
+      verifyResendEffectWebhook({
+        headers: {
+          id: "msg_invalid",
+          signature: "v1,invalid",
+          timestamp: String(Math.floor(Date.now() / 1000)),
+        },
+        payload: "{}",
+        tenantId: "tenant-a",
+        webhookSecret: "whsec_MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+      }),
+    ).toThrow();
   });
 });

@@ -6,15 +6,26 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
   contract: 2,
   discovery: {
     audiences: ["agent-hosts", "application-developers"],
-    intents: ["send transactional email", "execute installed email effects"],
-    keywords: ["email", "resend", "idempotency", "effect-adapter"],
+    intents: [
+      "send transactional email",
+      "execute installed email effects",
+      "verify effect webhook evidence",
+    ],
+    keywords: [
+      "email",
+      "resend",
+      "idempotency",
+      "effect-adapter",
+      "webhook",
+      "reconciliation",
+    ],
     protocols: ["HTTPS"],
   },
   identity: {
     accent: "#111827",
     category: "messaging",
     description:
-      "Resend-backed EmailAdapter and credential-safe installed effect driver with stable provider idempotency.",
+      "Resend-backed EmailAdapter and credential-safe installed effect driver with stable idempotency and signed webhook evidence.",
     docsUrl: "https://github.com/absolutejs/dispatch-adapters/tree/main/resend",
     name: "@absolutejs/dispatch-resend",
     tagline: "Deliver your site’s email with Resend.",
@@ -37,7 +48,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "resend",
-            range: "^4.0.0",
+            range: ">=6.18.0",
             reason: "Resend SDK client",
           },
         ],
@@ -73,12 +84,12 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "@absolutejs/execution",
-            range: ">=0.6.2 <0.8.0",
+            range: ">=0.8.0 <0.9.0",
             reason: "Credential-safe installed effect execution",
           },
           {
             name: "resend",
-            range: ">=4.0.0",
+            range: ">=6.18.0",
             reason: "Resend SDK client",
           },
         ],
