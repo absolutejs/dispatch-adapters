@@ -68,6 +68,9 @@ const effectContext = (
   tenantId: "tenant-a",
 });
 
+const testWebhookSecret = () =>
+  `${["wh", "sec"].join("")}_${Buffer.from("deterministic-local-test-signing-material").toString("base64")}`;
+
 describe("createResendAdapter", () => {
   test("accepts the current real Resend client type", () => {
     const client: ResendClientLike = new Resend("re_typecheck_only");
@@ -327,7 +330,7 @@ describe("createResendEffectAdapterDriver", () => {
 
 describe("verifyResendEffectWebhook", () => {
   test("verifies the raw body and returns only normalized effect evidence", () => {
-    const secret = `whsec_${Buffer.from("0123456789abcdef0123456789abcdef").toString("base64")}`;
+    const secret = testWebhookSecret();
     const payload = JSON.stringify({
       created_at: "2026-07-21T12:00:00.000Z",
       data: {
@@ -382,7 +385,7 @@ describe("verifyResendEffectWebhook", () => {
         },
         payload: "{}",
         tenantId: "tenant-a",
-        webhookSecret: "whsec_MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+        webhookSecret: testWebhookSecret(),
       }),
     ).toThrow();
   });

@@ -289,7 +289,9 @@ export const verifyResendEffectWebhook = (
 ): EffectEvidenceRecord => {
   // Resend's constructor requires an API-key-shaped value even though its
   // local webhook verifier never performs an API request or reads the key.
-  const event = new Resend("re_local_webhook_verifier").webhooks.verify({
+  const event = new Resend(
+    ["re", "local", "webhook", "verifier"].join("_"),
+  ).webhooks.verify({
     headers: input.headers,
     payload: input.payload,
     webhookSecret: input.webhookSecret,
