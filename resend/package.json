@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-resend",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Resend-backed EmailAdapter and credential-safe installed effect driver for AbsoluteJS.",
   "repository": {
     "type": "git",

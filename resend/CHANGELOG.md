@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] — 2026-07-21
+
+- Keep local verifier and signing fixtures visibly synthetic so repository
+  secret scanners do not mistake test-only material for live credentials.
+
 ## [0.2.0] — 2026-07-21
 
 - Upgrade to `@absolutejs/execution` 0.8 and Resend 6.18.
