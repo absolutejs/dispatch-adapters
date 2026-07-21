@@ -48,7 +48,7 @@ export const resendEffectAdapterDescriptor: EffectAdapterDescriptor = {
     requiresMandate: false,
   },
   title: "Resend transactional email",
-  version: "0.1.1",
+  version: "0.1.2",
 };
 
 export class ResendEffectInputError extends Error {}
