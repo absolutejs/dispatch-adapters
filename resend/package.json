@@ -1,10 +1,10 @@
 {
   "name": "@absolutejs/dispatch-resend",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Resend-backed EmailAdapter with credential-safe installed effects, signed evidence, and reference-gated query recovery.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/absolutejs/dispatch-adapters.git",
+    "url": "git+https://github.com/absolutejs/dispatch-adapters.git",
     "directory": "resend"
   },
   "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/resend",
@@ -28,23 +28,25 @@
     "transactional"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external @absolutejs/execution --external resend && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external '@absolutejs/dispatch/*' --external @absolutejs/execution --external '@absolutejs/execution/*' --external @absolutejs/manifest --external @sinclair/typebox --external resend --external 'resend/*' && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
-    "release": "bun run format && bun run build && bun publish"
+    "verify-package": "absolute-manifest verify-package",
+    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build && bun run verify-package --artifacts",
+    "release": "bun run check:package && npm publish --access public"
   },
   "peerDependencies": {
-    "@absolutejs/dispatch": ">= 0.0.1",
-    "@absolutejs/execution": ">= 0.13.0 < 0.15.0",
-    "resend": ">= 6.18.0"
+    "@absolutejs/dispatch": ">=0.1.1 <0.2",
+    "@absolutejs/execution": ">=0.14.6 <0.15",
+    "resend": ">=6.18.0 <7"
   },
   "devDependencies": {
-    "@absolutejs/dispatch": "^0.0.5",
-    "@absolutejs/execution": "^0.14.0",
+    "@absolutejs/dispatch": "0.1.1",
+    "@absolutejs/execution": "0.14.6",
     "@types/bun": "1.3.14",
     "prettier": "3.5.3",
-    "resend": "^6.18.0",
+    "resend": "6.18.0",
     "standardwebhooks": "1.0.0",
     "typescript": "5.8.3"
   },
@@ -66,10 +68,44 @@
     "README.md"
   ],
   "absolutejs": {
-    "manifestContract": 2
+    "manifestContract": 2,
+    "runtimePeers": {
+      "@absolutejs/dispatch": {
+        "artifactImports": [],
+        "buildExternals": [
+          "@absolutejs/dispatch",
+          "@absolutejs/dispatch/*"
+        ],
+        "optional": false,
+        "range": ">=0.1.1 <0.2",
+        "tested": "0.1.1"
+      },
+      "@absolutejs/execution": {
+        "artifactImports": [],
+        "buildExternals": [
+          "@absolutejs/execution",
+          "@absolutejs/execution/*"
+        ],
+        "optional": false,
+        "range": ">=0.14.6 <0.15",
+        "tested": "0.14.6"
+      },
+      "resend": {
+        "artifactImports": [
+          "resend"
+        ],
+        "buildExternals": [
+          "resend",
+          "resend/*"
+        ],
+        "optional": false,
+        "range": ">=6.18.0 <7",
+        "tested": "6.18.0"
+      }
+    }
   },
   "dependencies": {
-    "@absolutejs/manifest": "^0.3.0",
+    "@absolutejs/manifest": "0.7.2",
     "@sinclair/typebox": "^0.34.0"
   }
 }

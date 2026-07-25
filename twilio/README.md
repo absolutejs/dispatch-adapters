@@ -14,19 +14,19 @@ bun add @absolutejs/dispatch @absolutejs/dispatch-twilio twilio
 ## Usage
 
 ```ts
-import twilio from 'twilio';
-import { createDispatcher } from '@absolutejs/dispatch';
-import { createTwilioAdapter } from '@absolutejs/dispatch-twilio';
+import twilio from "twilio";
+import { createDispatcher } from "@absolutejs/dispatch";
+import { createTwilioAdapter } from "@absolutejs/dispatch-twilio";
 
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
+  process.env.TWILIO_AUTH_TOKEN!,
 );
 
 const dispatcher = createDispatcher({
   sms: createTwilioAdapter({
     client: twilioClient,
-    defaultFrom: '+15551234567',
+    defaultFrom: "+15551234567",
     // OR — instead of a single from number, use a Messaging Service:
     // messagingServiceSid: 'MG...',
     // Optional webhook for status updates (queued → sent → delivered/failed):
@@ -35,8 +35,8 @@ const dispatcher = createDispatcher({
 });
 
 const result = await dispatcher.sms({
-  to: '+12025550100',
-  body: 'Your verification code: 482910',
+  to: "+12025550100",
+  body: "Your verification code: 482910",
 });
 
 console.log(result.id); // Twilio Message SID (SM...)

@@ -19,7 +19,7 @@
  * management); leave it unset to require `from` per message or
  * `defaultFrom`.
  */
-import type { SmsAdapter, SmsMessage } from '@absolutejs/dispatch';
+import type { SmsAdapter, SmsMessage } from "@absolutejs/dispatch";
 
 /**
  * Minimal subset of Twilio's client we use. `client.messages.create`
@@ -28,92 +28,86 @@ import type { SmsAdapter, SmsMessage } from '@absolutejs/dispatch';
  * we touch.
  */
 export type TwilioClientLike = {
-	messages: {
-		create: (params: {
-			to: string;
-			body: string;
-			from?: string;
-			messagingServiceSid?: string;
-			statusCallback?: string;
-		}) => Promise<{
-			sid?: string;
-			status?: string;
-			errorCode?: number | null;
-			errorMessage?: string | null;
-		}>;
-	};
+  messages: {
+    create: (params: {
+      to: string;
+      body: string;
+      from?: string;
+      messagingServiceSid?: string;
+      statusCallback?: string;
+    }) => Promise<{
+      sid?: string;
+      status?: string;
+      errorCode?: number | null;
+      errorMessage?: string | null;
+    }>;
+  };
 };
 
 export type CreateTwilioAdapterOptions = {
-	/** The Twilio client (`twilio(accountSid, authToken)`). */
-	client: TwilioClientLike;
-	/**
-	 * Default origination number (E.164). Required if your messages
-	 * don't supply `from` AND you're not using a Messaging Service.
-	 */
-	defaultFrom?: string;
-	/**
-	 * Twilio Messaging Service SID. When set, the adapter uses
-	 * service-based routing instead of a single origination number.
-	 * Pass this OR `defaultFrom`, not both — per-message `from`
-	 * overrides this on a per-call basis.
-	 */
-	messagingServiceSid?: string;
-	/**
-	 * Twilio status callback URL — invoked when message status
-	 * changes (queued → sent → delivered/failed). Wire this to your
-	 * own webhook to record delivery in audit.
-	 */
-	statusCallback?: string;
+  /** The Twilio client (`twilio(accountSid, authToken)`). */
+  client: TwilioClientLike;
+  /**
+   * Default origination number (E.164). Required if your messages
+   * don't supply `from` AND you're not using a Messaging Service.
+   */
+  defaultFrom?: string;
+  /**
+   * Twilio Messaging Service SID. When set, the adapter uses
+   * service-based routing instead of a single origination number.
+   * Pass this OR `defaultFrom`, not both — per-message `from`
+   * overrides this on a per-call basis.
+   */
+  messagingServiceSid?: string;
+  /**
+   * Twilio status callback URL — invoked when message status
+   * changes (queued → sent → delivered/failed). Wire this to your
+   * own webhook to record delivery in audit.
+   */
+  statusCallback?: string;
 };
 
 export const createTwilioAdapter = (
-	options: CreateTwilioAdapterOptions
+  options: CreateTwilioAdapterOptions,
 ): SmsAdapter => {
-	const { client } = options;
+  const { client } = options;
 
-	return {
-		name: 'twilio',
-		send: async (message: SmsMessage) => {
-			const from = message.from ?? options.defaultFrom;
-			if (
-				from === undefined &&
-				options.messagingServiceSid === undefined
-			) {
-				throw new Error(
-					'[dispatch-twilio] no sender configured. ' +
-						'Pass `message.from`, `createTwilioAdapter({ defaultFrom })`, or ' +
-						'`createTwilioAdapter({ messagingServiceSid })`.'
-				);
-			}
-			const params: Parameters<TwilioClientLike['messages']['create']>[0] = {
-				body: message.body,
-				to: message.to
-			};
-			if (from !== undefined) params.from = from;
-			else if (options.messagingServiceSid !== undefined) {
-				params.messagingServiceSid = options.messagingServiceSid;
-			}
-			if (options.statusCallback !== undefined) {
-				params.statusCallback = options.statusCallback;
-			}
-			const response = await client.messages.create(params);
-			// Twilio's SDK rejects on API errors via thrown errors, so a
-			// returned response with `errorCode != null` is the
-			// unusual-but-documented case (some bulk-send flows).
-			if (
-				response.errorCode !== null &&
-				response.errorCode !== undefined
-			) {
-				throw new Error(
-					`[dispatch-twilio] Twilio errorCode ${response.errorCode}: ${response.errorMessage ?? '(no message)'}`
-				);
-			}
-			return {
-				at: Date.now(),
-				...(response.sid !== undefined ? { id: response.sid } : {}),
-				provider: 'twilio'
-			};
-		}
-	};
+  return {
+    name: "twilio",
+    send: async (message: SmsMessage) => {
+      const from = message.from ?? options.defaultFrom;
+      if (from === undefined && options.messagingServiceSid === undefined) {
+        throw new Error(
+          "[dispatch-twilio] no sender configured. " +
+            "Pass `message.from`, `createTwilioAdapter({ defaultFrom })`, or " +
+            "`createTwilioAdapter({ messagingServiceSid })`.",
+        );
+      }
+      const params: Parameters<TwilioClientLike["messages"]["create"]>[0] = {
+        body: message.body,
+        to: message.to,
+      };
+      if (from !== undefined) params.from = from;
+      else if (options.messagingServiceSid !== undefined) {
+        params.messagingServiceSid = options.messagingServiceSid;
+      }
+      if (options.statusCallback !== undefined) {
+        params.statusCallback = options.statusCallback;
+      }
+      const response = await client.messages.create(params);
+      // Twilio's SDK rejects on API errors via thrown errors, so a
+      // returned response with `errorCode != null` is the
+      // unusual-but-documented case (some bulk-send flows).
+      if (response.errorCode !== null && response.errorCode !== undefined) {
+        throw new Error(
+          `[dispatch-twilio] Twilio errorCode ${response.errorCode}: ${response.errorMessage ?? "(no message)"}`,
+        );
+      }
+      return {
+        at: Date.now(),
+        ...(response.sid !== undefined ? { id: response.sid } : {}),
+        provider: "twilio",
+      };
+    },
+  };
 };

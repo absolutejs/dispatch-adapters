@@ -3,7 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { CreateApnsAdapterOptions } from "./index";
 
 export const manifest = defineManifest<CreateApnsAdapterOptions>()({
-  contract: 1,
+  contract: 2,
   identity: {
     accent: "#111827",
     category: "messaging",
@@ -44,17 +44,13 @@ export const manifest = defineManifest<CreateApnsAdapterOptions>()({
         peers: [],
       },
       settings: Type.Object({
-        bundleId: Type.String({ minLength: 1, title: "Bundle id" }),
         environment: Type.Optional(
           Type.Union([Type.Literal("production"), Type.Literal("sandbox")]),
         ),
-        keyId: Type.String({ minLength: 1, title: "Key id" }),
-        privateKey: Type.String({ minLength: 1, title: "Private key" }),
-        teamId: Type.String({ minLength: 1, title: "Team id" }),
       }),
       title: "Apple Push Notification service",
       wiring: {
-        code: "createApnsAdapter({ bundleId: ${settings.bundleId}, environment: ${settings.environment}, keyId: ${settings.keyId}, privateKey: ${settings.privateKey}, teamId: ${settings.teamId} })",
+        code: "createApnsAdapter({ bundleId: ${env.APNS_BUNDLE_ID}, keyId: ${env.APNS_KEY_ID}, privateKey: ${env.APNS_PRIVATE_KEY}, teamId: ${env.APNS_TEAM_ID}, ...${settings} })",
         imports: [
           { from: "@absolutejs/dispatch-apns", names: ["createApnsAdapter"] },
         ],

@@ -85,7 +85,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "@absolutejs/execution",
-            range: ">=0.11.0 <0.12.0",
+            range: ">=0.14.6 <0.15",
             reason: "Credential-safe installed effect execution",
           },
           {
@@ -116,7 +116,7 @@ export const manifest = defineManifest<CreateResendAdapterOptions>()({
         peers: [
           {
             name: "@absolutejs/execution",
-            range: ">=0.11.0 <0.12.0",
+            range: ">=0.14.6 <0.15",
             reason: "Reference-gated provider query reconciliation",
           },
           {

@@ -14,28 +14,28 @@ bun add @absolutejs/dispatch @absolutejs/dispatch-postmark postmark
 ## Usage
 
 ```ts
-import { ServerClient } from 'postmark';
-import { createDispatcher } from '@absolutejs/dispatch';
-import { createPostmarkAdapter } from '@absolutejs/dispatch-postmark';
+import { ServerClient } from "postmark";
+import { createDispatcher } from "@absolutejs/dispatch";
+import { createPostmarkAdapter } from "@absolutejs/dispatch-postmark";
 
 const postmark = new ServerClient(process.env.POSTMARK_SERVER_TOKEN!);
 
 const dispatcher = createDispatcher({
   email: createPostmarkAdapter({
     client: postmark,
-    defaultFrom: 'no-reply@acme.io',
+    defaultFrom: "no-reply@acme.io",
     // Optional — defaults to Postmark's transactional stream.
     // messageStream: 'broadcast',
   }),
 });
 
 await dispatcher.email({
-  to: 'alice@example.com',
-  subject: 'Welcome to Acme',
-  text: 'Click here to verify: ...',
+  to: "alice@example.com",
+  subject: "Welcome to Acme",
+  text: "Click here to verify: ...",
   // metadata.tag → Postmark Tag (single-string analytics segment);
   // other string entries → Postmark Metadata (string→string map):
-  metadata: { tag: 'onboarding', campaign: 'welcome-v2' },
+  metadata: { tag: "onboarding", campaign: "welcome-v2" },
 });
 ```
 
@@ -67,8 +67,8 @@ Override to customize:
 createPostmarkAdapter({
   client: postmark,
   mapMetadata: (metadata) => ({
-    Tag: typeof metadata.flow === 'string' ? metadata.flow : 'transactional',
-    Metadata: { tenant: String(metadata.tenant ?? 'unknown') },
+    Tag: typeof metadata.flow === "string" ? metadata.flow : "transactional",
+    Metadata: { tenant: String(metadata.tenant ?? "unknown") },
   }),
 });
 ```
@@ -78,7 +78,9 @@ createPostmarkAdapter({
 Postmark's response shape:
 
 ```ts
-{ MessageID, SubmittedAt, To, ErrorCode, Message }
+{
+  MessageID, SubmittedAt, To, ErrorCode, Message;
+}
 ```
 
 - `ErrorCode !== 0` (and not undefined) → adapter throws with

@@ -3,7 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { CreateFcmAdapterOptions } from "./index";
 
 export const manifest = defineManifest<CreateFcmAdapterOptions>()({
-  contract: 1,
+  contract: 2,
   identity: {
     accent: "#F59E0B",
     category: "messaging",
@@ -21,22 +21,17 @@ export const manifest = defineManifest<CreateFcmAdapterOptions>()({
       requires: {
         env: [
           {
-            description: "Firebase target project id",
-            example: "my-app-production",
-            key: "FCM_PROJECT_ID",
-            secret: false,
-          },
-          {
             description:
               "Path to a service-account JSON file when workload identity is unavailable",
             key: "GOOGLE_APPLICATION_CREDENTIALS",
-            secret: true,
+            optional: true,
+            secret: false,
           },
         ],
         peers: [
           {
             name: "google-auth-library",
-            range: "^10.0.0",
+            range: ">=10.0.0 <11",
             reason: "Application Default Credentials and OAuth token rotation",
           },
         ],
