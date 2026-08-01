@@ -82,7 +82,11 @@ describe("readiness", () => {
         messaging: {
           v1: {
             services: () => ({
-              channelSenders: { list: async () => [] },
+              channelSenders: {
+                list: async () => [
+                  { sender: "rcs:acme_agent", senderType: "RCS" },
+                ],
+              },
               fetch: async () => ({
                 accountSid,
                 inboundMethod: "POST",
@@ -101,6 +105,7 @@ describe("readiness", () => {
       inboundWebhookUrl,
       messagingServiceSid,
       requiresUsA2PRegistration: true,
+      requiresRcsSender: true,
       statusCallbackUrl,
       store,
     });
@@ -109,6 +114,12 @@ describe("readiness", () => {
     expect(report.checks).toContainEqual({
       id: "sender-pool",
       message: "Messaging Service has at least one sender",
+      source: "twilio-api",
+      status: "pass",
+    });
+    expect(report.checks).toContainEqual({
+      id: "rcs-sender",
+      message: "Messaging Service has an RCS sender",
       source: "twilio-api",
       status: "pass",
     });

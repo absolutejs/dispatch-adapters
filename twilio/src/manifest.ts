@@ -8,10 +8,10 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
     accent: "#f22f46",
     category: "messaging",
     description:
-      "Production Twilio messaging for `@absolutejs/dispatch`, with Messaging Service sending, signed lifecycle webhooks, opt-out events, and readiness checks.",
+      "Production Twilio SMS, MMS, RCS, and WhatsApp for `@absolutejs/dispatch`, with signed webhooks, consent integration, registration automation, and readiness checks.",
     docsUrl: "https://github.com/absolutejs/dispatch-adapters/tree/main/twilio",
     name: "@absolutejs/dispatch-twilio",
-    tagline: "Send text messages with Twilio.",
+    tagline: "Run compliant messaging programs with Twilio.",
   },
   implements: [
     defineImplementation<CreateTwilioAdapterOptions>()({

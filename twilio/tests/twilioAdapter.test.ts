@@ -105,6 +105,33 @@ describe("createTwilioAdapter", () => {
     });
   });
 
+  test("sends RCS with automatic SMS fallback", async () => {
+    const mock = makeMockTwilio();
+    const adapter = createAdapter(mock.client);
+    await adapter.send({
+      body: "Rich alert",
+      channel: "rcs",
+      rcs: { fallbackFrom: "+12025550199" },
+      to: "+12025550100",
+    });
+    expect(mock.calls[0]).toMatchObject({
+      fallbackFrom: "+12025550199",
+      to: "+12025550100",
+    });
+  });
+
+  test("can require RCS without SMS fallback", async () => {
+    const mock = makeMockTwilio();
+    const adapter = createAdapter(mock.client);
+    await adapter.send({
+      body: "Rich alert",
+      channel: "rcs",
+      rcs: { fallback: "disabled" },
+      to: "+12025550100",
+    });
+    expect(mock.calls[0]?.to).toBe("rcs:+12025550100");
+  });
+
   test("sends media, templates, schedules, and tenant-routed WhatsApp", async () => {
     const base = makeMockTwilio();
     const tenant = makeMockTwilio();
@@ -181,6 +208,24 @@ describe("createTwilioAdapter", () => {
     [{ body: "alert", to: "2025550100" }, "recipient"],
     [{ body: "alert", from: "sender", to: "+12025550100" }, "sender"],
     [{ body: "  ", to: "+12025550100" }, "body"],
+    [
+      {
+        body: "alert",
+        channel: "rcs" as const,
+        from: "+12025550199",
+        to: "+12025550100",
+      },
+      "RCS sender",
+    ],
+    [
+      {
+        body: "alert",
+        channel: "sms" as const,
+        from: "whatsapp:+12025550199",
+        to: "+12025550100",
+      },
+      "sender",
+    ],
   ])("rejects malformed outbound messages", async (message, expected) => {
     const mock = makeMockTwilio();
     await expect(createAdapter(mock.client).send(message)).rejects.toThrow(

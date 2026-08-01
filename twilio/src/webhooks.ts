@@ -1,4 +1,8 @@
 import twilio from "twilio";
+import type {
+  MessagingConsentLedger,
+  MessagingConsentScope,
+} from "@absolutejs/compliance";
 import {
   TWILIO_MESSAGE_STATUSES,
   type TwilioConsentEvent,
@@ -18,6 +22,13 @@ export type CreateTwilioWebhookHandlerOptions = {
   /** Exact public HTTPS callback URL configured in Twilio. */
   publicUrl: string;
   store: TwilioLifecycleStore;
+  /** Persist signed START/STOP events into the provider-neutral consent ledger. */
+  consent?: {
+    ledger: MessagingConsentLedger;
+    resolveScope: (
+      event: TwilioConsentEvent,
+    ) => Promise<MessagingConsentScope> | MessagingConsentScope;
+  };
   /** Called only after an event is atomically accepted by the store. */
   onEvent: (event: TwilioWebhookEvent) => Promise<void> | void;
   /** Maximum accepted form body. Defaults to 64 KiB. */
@@ -207,6 +218,23 @@ export const createTwilioWebhookProcessor = (
     const result = await options.store.begin(event);
     if (result.claimToken !== undefined) {
       try {
+        if (event.kind === "consent" && event.optOutType !== "HELP") {
+          const scope = await options.consent?.resolveScope(event);
+          if (scope !== undefined) {
+            const evidence = {
+              at: event.receivedAt,
+              idempotencyKey: `twilio:${event.eventId}`,
+              metadata: { optOutType: event.optOutType },
+              reference: event.messageSid,
+              source: "twilio-advanced-opt-out",
+            };
+            if (event.optOutType === "START") {
+              await options.consent?.ledger.grant(scope, evidence);
+            } else {
+              await options.consent?.ledger.revoke(scope, evidence);
+            }
+          }
+        }
         await options.onEvent(event);
         await options.store.complete(event.eventId, result.claimToken);
       } catch (error) {

@@ -6,6 +6,7 @@ export type TwilioMessageCreateParams = {
   contentSid?: string;
   contentVariables?: string;
   from?: string;
+  fallbackFrom?: string;
   mediaUrl?: string[];
   messagingServiceSid: string;
   scheduleType?: "fixed";
@@ -70,6 +71,7 @@ export class TwilioIdempotencyInFlightError extends Error {
 }
 
 const E164 = /^\+[1-9]\d{1,14}$/;
+const RCS_RECIPIENT = /^rcs:\+[1-9]\d{1,14}$/;
 const WHATSAPP = /^whatsapp:\+[1-9]\d{1,14}$/;
 const MESSAGING_SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
 const CONTENT_SID = /^HX[0-9a-fA-F]{32}$/;
@@ -116,16 +118,44 @@ const assertMessage = (message: SmsMessage) => {
   const channel = message.channel ?? "sms";
   if (
     (channel === "whatsapp" && !WHATSAPP.test(message.to)) ||
-    (channel !== "whatsapp" && !E164.test(message.to))
+    (channel === "rcs" &&
+      !E164.test(message.to) &&
+      !RCS_RECIPIENT.test(message.to)) ||
+    (channel !== "whatsapp" && channel !== "rcs" && !E164.test(message.to))
   ) {
     throw new TwilioConfigurationError(
-      "SMS recipient must be an E.164 phone number",
+      "recipient must match the selected messaging channel",
+    );
+  }
+  if (channel !== "rcs" && message.rcs !== undefined) {
+    throw new TwilioConfigurationError("rcs options require channel rcs");
+  }
+  if (message.rcs?.fallback === "automatic" && RCS_RECIPIENT.test(message.to)) {
+    throw new TwilioConfigurationError(
+      "automatic RCS fallback requires an E.164 recipient without the rcs: prefix",
+    );
+  }
+  if (message.rcs?.fallbackFrom !== undefined) {
+    if (!E164.test(message.rcs.fallbackFrom)) {
+      throw new TwilioConfigurationError(
+        "RCS fallback sender must be an E.164 phone number",
+      );
+    }
+    if (message.rcs.fallback === "disabled" || RCS_RECIPIENT.test(message.to)) {
+      throw new TwilioConfigurationError(
+        "RCS fallback sender cannot be used when fallback is disabled",
+      );
+    }
+  }
+  if (channel === "rcs" && message.from !== undefined) {
+    throw new TwilioConfigurationError(
+      "RCS sender comes from the Messaging Service pool; use rcs.fallbackFrom for fallback",
     );
   }
   if (
     message.from !== undefined &&
-    !E164.test(message.from) &&
-    !WHATSAPP.test(message.from)
+    ((channel === "whatsapp" && !WHATSAPP.test(message.from)) ||
+      (channel !== "whatsapp" && !E164.test(message.from)))
   ) {
     throw new TwilioConfigurationError(
       "SMS sender must be an E.164 phone number",
@@ -231,9 +261,29 @@ export const createTwilioAdapter = (
               }),
           messagingServiceSid,
           statusCallback,
-          to: message.to,
+          to:
+            message.channel === "rcs" &&
+            message.rcs?.fallback === "disabled" &&
+            E164.test(message.to)
+              ? `rcs:${message.to}`
+              : message.to,
         };
-        const from = message.from ?? tenant?.from;
+        if (message.rcs?.fallbackFrom !== undefined) {
+          params.fallbackFrom = message.rcs.fallbackFrom;
+        }
+        const from =
+          message.channel === "rcs"
+            ? undefined
+            : (message.from ?? tenant?.from);
+        if (
+          from !== undefined &&
+          ((message.channel === "whatsapp" && !WHATSAPP.test(from)) ||
+            (message.channel !== "whatsapp" && !E164.test(from)))
+        ) {
+          throw new TwilioConfigurationError(
+            "resolved sender must match the selected messaging channel",
+          );
+        }
         if (from !== undefined) params.from = from;
         if (message.sendAt !== undefined) {
           params.scheduleType = "fixed";

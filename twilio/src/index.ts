@@ -9,6 +9,17 @@ export {
   type TwilioTenantConfiguration,
 } from "./adapter";
 export {
+  createTwilioComplianceManager,
+  type TwilioA2PBrandRegistrationInput,
+  type TwilioA2PCampaignRegistrationInput,
+  type TwilioComplianceClientLike,
+  type TwilioComplianceInspectionTarget,
+  type TwilioComplianceResource,
+  type TwilioComplianceStatusCheck,
+  type TwilioComplianceStatusReport,
+  type TwilioTollFreeVerificationInput,
+} from "./complianceRegistration";
+export {
   createMemoryTwilioIdempotencyStore,
   createPostgresTwilioIdempotencyStore,
   TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA,

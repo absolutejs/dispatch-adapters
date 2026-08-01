@@ -64,7 +64,9 @@ export type TwilioMessagingInspectorClientLike = {
     v1: {
       services: (sid: string) => {
         channelSenders: {
-          list: (input: { limit: number }) => Promise<unknown[]>;
+          list: (input: {
+            limit: number;
+          }) => Promise<Array<{ sender?: string; senderType?: string }>>;
         };
         phoneNumbers: {
           list: (input: { limit: number }) => Promise<unknown[]>;
@@ -89,6 +91,8 @@ export const inspectTwilioMessagingReadiness = async (input: {
   expectedAccountSid: string;
   inboundWebhookUrl: string;
   messagingServiceSid: string;
+  /** Require an approved RCS sender in the Messaging Service sender pool. */
+  requiresRcsSender?: boolean;
   requiresUsA2PRegistration?: boolean;
   statusCallbackUrl: string;
   store: TwilioLifecycleStore;
@@ -99,7 +103,7 @@ export const inspectTwilioMessagingReadiness = async (input: {
       context.fetch(),
       context.phoneNumbers.list({ limit: 1 }),
       context.shortCodes.list({ limit: 1 }),
-      context.channelSenders.list({ limit: 1 }),
+      context.channelSenders.list({ limit: 1_000 }),
     ],
   );
   const apiChecks: TwilioReadinessCheck[] = [
@@ -151,6 +155,22 @@ export const inspectTwilioMessagingReadiness = async (input: {
           ? "pass"
           : "fail",
     },
+    ...(input.requiresRcsSender === true
+      ? [
+          {
+            id: "rcs-sender",
+            message: "Messaging Service has an RCS sender",
+            source: "twilio-api" as const,
+            status: channelSenders.some(
+              ({ sender, senderType }) =>
+                sender?.toLowerCase().startsWith("rcs:") === true ||
+                senderType?.toLowerCase() === "rcs",
+            )
+              ? ("pass" as const)
+              : ("fail" as const),
+          },
+        ]
+      : []),
   ];
   const asserted = checkTwilioMessagingReadiness({
     assertions: {

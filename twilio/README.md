@@ -1,9 +1,10 @@
 # @absolutejs/dispatch-twilio
 
-Production Twilio SMS for
+Production Twilio SMS, MMS, RCS, and WhatsApp for
 [`@absolutejs/dispatch`](https://github.com/absolutejs/dispatch): Messaging
 Service sending, signed lifecycle webhooks, normalized delivery and consent
-events, retry-safe persistence boundaries, and operational readiness checks.
+events, enforceable consent, registration automation, retry-safe persistence
+boundaries, and operational readiness checks.
 
 This package supplies application infrastructure. Twilio still owns carrier
 registration and enforcement, and the application owner remains responsible
@@ -13,6 +14,12 @@ for lawful consent and correct campaign configuration.
 
 ```sh
 bun add @absolutejs/dispatch @absolutejs/dispatch-twilio twilio
+```
+
+Add `@absolutejs/compliance` when using the shared consent ledger:
+
+```sh
+bun add @absolutejs/compliance
 ```
 
 ## Send alerts
@@ -49,6 +56,24 @@ const result = await dispatcher.sms({
 
 console.log(result.id); // SM...
 ```
+
+### RCS with fallback
+
+Add an approved RCS sender to the Messaging Service sender pool. An E.164
+recipient tries RCS first and lets Twilio fall back to SMS/MMS:
+
+```ts
+await dispatcher.sms({
+  body: "CPU usage has exceeded 90%.",
+  channel: "rcs",
+  rcs: { fallbackFrom: "+12025550199" },
+  to: "+12025550100",
+});
+```
+
+Set `rcs.fallback` to `"disabled"` (or use a `rcs:+E164` recipient) when the
+message must not fall back. Templates and HTTPS media use the same
+`template` and `mediaUrls` fields as the other messaging channels.
 
 The dispatch contract also supports MMS media, WhatsApp destinations, Twilio
 Content templates, scheduled sends, and durable idempotency keys:
@@ -133,6 +158,68 @@ app.post("/webhooks/twilio/messaging", ({ request }) =>
 );
 ```
 
+To make opt-outs enforceable before a provider call, connect signed START and
+STOP events to `@absolutejs/compliance`. The application resolves the exact
+tenant, sender, and topic because those are product concepts:
+
+```ts
+import {
+  createMessagingConsentDispatchPolicy,
+  createMessagingConsentLedger,
+  createPostgresMessagingConsentStore,
+} from "@absolutejs/compliance";
+
+const consent = createMessagingConsentLedger({
+  audit,
+  store: createPostgresMessagingConsentStore(postgres),
+});
+
+const dispatcher = createDispatcher({
+  policies: [createMessagingConsentDispatchPolicy({ ledger: consent })],
+  sms: createTwilioAdapter({ client, messagingServiceSid, statusCallbackUrl }),
+});
+
+const handleTwilioWebhook = createTwilioWebhookHandler({
+  authToken,
+  expectedAccountSid,
+  publicUrl: statusCallbackUrl,
+  store: lifecycleStore,
+  consent: {
+    ledger: consent,
+    resolveScope: (event) => ({
+      recipient: event.from!,
+      senderId: "acme",
+      tenant: "tenant-a",
+      topic: "incident-alerts",
+      transport: "sms",
+    }),
+  },
+  onEvent: async (event) => alerts.recordTwilioEvent(event),
+});
+
+await consent.grant(
+  {
+    recipient: "+12025550100",
+    senderId: "acme",
+    tenant: "tenant-a",
+    topic: "incident-alerts",
+    transport: "sms",
+  },
+  { at: Date.now(), reference: "settings-form-v3", source: "product-settings" },
+);
+
+await dispatcher.sms({
+  body: "CPU usage has exceeded 90%.",
+  consent: { senderId: "acme", topic: "incident-alerts" },
+  tenant: "tenant-a",
+  to: "+12025550100",
+});
+```
+
+Apply `MESSAGING_CONSENT_POSTGRES_SCHEMA` before constructing the Postgres
+store. Missing consent and revoked scopes are denied before Twilio is called.
+Webhook retry deduplication uses the signed Twilio event identity.
+
 `publicUrl` is fixed configuration and is the exact HTTPS URL Twilio signs.
 The handler does not trust forwarded host/protocol headers. It also binds each
 request to the expected account and, when supplied, Messaging Service.
@@ -173,6 +260,49 @@ when a framework needs control over its own response format.
 
 ## Operational readiness
 
+### Registration submission and status
+
+The compliance manager validates common evidence constraints before submitting
+Twilio A2P brand/campaign or toll-free verification requests. It can then
+inspect the live provider states:
+
+```ts
+import { createTwilioComplianceManager } from "@absolutejs/dispatch-twilio";
+
+const registration = createTwilioComplianceManager(client);
+
+const brand = await registration.registerA2PBrand({
+  customerProfileBundleSid,
+  a2PProfileBundleSid,
+  brandType: "STANDARD",
+});
+
+const campaign = await registration.registerA2PCampaign(messagingServiceSid, {
+  brandRegistrationSid: brand.sid,
+  description: "Operational alerts selected by Pro-tier account owners.",
+  messageFlow: "Customers enable alerts in settings and can text STOP.",
+  messageSamples: [sampleOne, sampleTwo],
+  usAppToPersonUsecase: "ACCOUNT_NOTIFICATION",
+  hasEmbeddedLinks: false,
+  hasEmbeddedPhone: false,
+  subscriberOptIn: true,
+  privacyPolicyUrl,
+  termsAndConditionsUrl,
+});
+
+const registrationStatus = await registration.inspect({
+  customerProfileSid,
+  brandRegistrationSid: brand.sid,
+  messagingServiceSid,
+  campaignSid: campaign.sid,
+  tollfreeVerificationSid,
+});
+```
+
+`submitTollFreeVerification()` covers the corresponding Twilio submission.
+Status checks are `pass`, `pending`, or `fail`; `ready` becomes true only when
+every requested resource is approved.
+
 ```ts
 import { inspectTwilioMessagingReadiness } from "@absolutejs/dispatch-twilio";
 
@@ -182,6 +312,7 @@ const report = await inspectTwilioMessagingReadiness({
   inboundWebhookUrl: "https://app.example.com/webhooks/twilio/inbound",
   messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
   requiresUsA2PRegistration: true,
+  requiresRcsSender: true,
   statusCallbackUrl: "https://app.example.com/webhooks/twilio/messaging",
   store: lifecycleStore,
   assertions: {

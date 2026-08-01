@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import twilio from "twilio";
 import {
+  createMemoryMessagingConsentStore,
+  createMessagingConsentLedger,
+} from "@absolutejs/compliance";
+import {
   createMemoryTwilioLifecycleStore,
   createTwilioWebhookHandler,
   createTwilioWebhookProcessor,
@@ -117,6 +121,49 @@ describe("Twilio webhook processing", () => {
       expect(events[0]).toMatchObject({ kind: "consent", optOutType });
     },
   );
+
+  test("persists signed START and STOP events into the consent ledger retry-safely", async () => {
+    const scope = {
+      recipient: "+12025550100",
+      senderId: "acme",
+      tenant: "tenant-a",
+      topic: "incident-alerts",
+      transport: "sms" as const,
+    };
+    const ledger = createMessagingConsentLedger({
+      store: createMemoryMessagingConsentStore(),
+    });
+    let failOnce = true;
+    const process = createTwilioWebhookProcessor({
+      authToken: AUTH_TOKEN,
+      consent: { ledger, resolveScope: () => scope },
+      expectedAccountSid: ACCOUNT_SID,
+      onEvent: () => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("downstream unavailable");
+        }
+      },
+      store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
+    });
+    const stop = {
+      AccountSid: ACCOUNT_SID,
+      From: scope.recipient,
+      MessageSid: MESSAGE_SID,
+      OptOutType: "STOP",
+      To: "+12025550199",
+    };
+    await expect(process(signedRequest(stop))).rejects.toThrow(
+      "downstream unavailable",
+    );
+    await process(signedRequest(stop));
+    expect(await ledger.decision(scope)).toMatchObject({
+      allowed: false,
+      code: "revoked",
+    });
+    expect(await ledger.history(scope)).toHaveLength(1);
+  });
 
   test("normalizes ordinary inbound replies and media", async () => {
     const events: TwilioWebhookEvent[] = [];

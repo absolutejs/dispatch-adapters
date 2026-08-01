@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0] — 2026-08-01
+
+### Channels
+
+- Add native RCS delivery through Messaging Service sender pools.
+- Support automatic SMS/MMS fallback, explicit fallback senders, and
+  required-RCS delivery with `rcs:+E164` recipients.
+- Add readiness inspection for an RCS sender in the configured service.
+
+### Consent and compliance
+
+- Persist signed Twilio START/STOP events into the provider-neutral
+  `@absolutejs/compliance` consent ledger with retry-safe event keys.
+- Add typed A2P brand/campaign and toll-free verification submission helpers.
+- Add live status inspection for Trust Hub customer profiles, A2P brands and
+  campaigns, and toll-free verification.
+- Keep every status report explicitly operational, not a legal certification.
+
 ## [0.2.1] — 2026-08-01
 
 - Include the repository's Apache 2.0 license text in published artifacts.
