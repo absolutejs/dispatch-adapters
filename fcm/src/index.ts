@@ -59,11 +59,11 @@ const stringData = (data: Record<string, unknown> | undefined) =>
 const objectMetadata = (
   metadata: Record<string, unknown> | undefined,
   key: string,
-) => {
+): Record<string, unknown> | undefined => {
   const value = metadata?.[key];
 
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value
+    ? (value as Record<string, unknown>)
     : undefined;
 };
 
@@ -82,6 +82,14 @@ const targetFor = (message: PushMessage) => {
 
   return { [targetType]: value };
 };
+
+const portableData = (message: PushMessage) => ({
+  ...(message.data ?? {}),
+  ...(message.deepLink ? { absoluteDeepLink: message.deepLink } : {}),
+  ...(message.actions?.length
+    ? { absoluteActions: JSON.stringify(message.actions) }
+    : {}),
+});
 
 const accessTokenFor = async (auth: GoogleAuthLike) => {
   const client = await auth.getClient();
@@ -137,10 +145,34 @@ export const createFcmAdapter = (
         message.title === undefined
           ? { body: message.body }
           : { body: message.body, title: message.title };
-      const data = stringData(message.data);
-      const android = objectMetadata(message.metadata, "android");
+      const data = stringData(portableData(message));
+      const declaredAndroid = objectMetadata(message.metadata, "android");
+      const android =
+        message.sound || message.deepLink
+          ? {
+              ...(declaredAndroid ?? {}),
+              notification: {
+                ...((declaredAndroid?.notification as Record<
+                  string,
+                  unknown
+                >) ?? {}),
+                ...(message.deepLink ? { click_action: message.deepLink } : {}),
+                ...(message.sound ? { sound: message.sound } : {}),
+              },
+            }
+          : declaredAndroid;
       const apns = objectMetadata(message.metadata, "apns");
-      const webpush = objectMetadata(message.metadata, "webpush");
+      const declaredWebpush = objectMetadata(message.metadata, "webpush");
+      const webpush = message.deepLink
+        ? {
+            ...(declaredWebpush ?? {}),
+            fcm_options: {
+              ...((declaredWebpush?.fcm_options as Record<string, unknown>) ??
+                {}),
+              link: message.deepLink,
+            },
+          }
+        : declaredWebpush;
       const response = await request(endpoint, {
         body: JSON.stringify({
           message: {

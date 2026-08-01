@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.0] — 2026-08-01
+
+- Publish the first stable release against the unified Dispatch 0.7 contract.
+
 ## [0.0.1] — 2026-05-30
 
 Initial preview. Postmark-backed `EmailAdapter` for `@absolutejs/dispatch`.

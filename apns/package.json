@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-apns",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Apple Push Notification service HTTP/2 PushAdapter for @absolutejs/dispatch with ES256 provider-token rotation.",
   "repository": {
     "type": "git",
@@ -37,10 +37,10 @@
     "release": "bun run check:package && npm publish --access public"
   },
   "peerDependencies": {
-    "@absolutejs/dispatch": ">=0.6.2 <0.7"
+    "@absolutejs/dispatch": ">=0.7.0 <0.8"
   },
   "devDependencies": {
-    "@absolutejs/dispatch": "0.6.2",
+    "@absolutejs/dispatch": "0.7.1",
     "@types/bun": "1.3.14",
     "prettier": "3.8.1",
     "typescript": "5.9.3"
@@ -73,8 +73,8 @@
           "@absolutejs/dispatch/*"
         ],
         "optional": false,
-        "range": ">=0.6.2 <0.7",
-        "tested": "0.6.2"
+        "range": ">=0.7.0 <0.8",
+        "tested": "0.7.1"
       }
     }
   },

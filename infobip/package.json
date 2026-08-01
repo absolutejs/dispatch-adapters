@@ -1,13 +1,13 @@
 {
-  "name": "@absolutejs/dispatch-fcm",
-  "version": "0.2.0",
-  "description": "Firebase Cloud Messaging HTTP v1 PushAdapter for @absolutejs/dispatch with ADC and short-lived OAuth token support.",
+  "name": "@absolutejs/dispatch-infobip",
+  "version": "0.1.0",
+  "description": "Infobip Messages API omnichannel adapter for @absolutejs/dispatch with validation, webhooks, and US registration workflows.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/absolutejs/dispatch-adapters.git",
-    "directory": "fcm"
+    "directory": "infobip"
   },
-  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/fcm",
+  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/infobip",
   "bugs": {
     "url": "https://github.com/absolutejs/dispatch-adapters/issues"
   },
@@ -22,13 +22,15 @@
   },
   "keywords": [
     "dispatch",
-    "push",
-    "fcm",
-    "firebase",
+    "sms",
+    "rcs",
+    "whatsapp",
+    "omnichannel",
+    "infobip",
     "absolutejs"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external '@absolutejs/dispatch/*' --external @absolutejs/manifest --external @sinclair/typebox --external google-auth-library --external 'google-auth-library/*' && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/dispatch --external '@absolutejs/dispatch/*' --external @absolutejs/manifest --external @absolutejs/reliability --external @sinclair/typebox && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
@@ -37,13 +39,16 @@
     "release": "bun run check:package && npm publish --access public"
   },
   "peerDependencies": {
-    "@absolutejs/dispatch": ">=0.7.0 <0.8",
-    "google-auth-library": ">=10.0.0 <11"
+    "@absolutejs/dispatch": ">=0.7.0 <0.8"
+  },
+  "dependencies": {
+    "@absolutejs/manifest": "0.8.0",
+    "@absolutejs/reliability": "0.1.0",
+    "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
     "@absolutejs/dispatch": "0.7.1",
     "@types/bun": "1.3.14",
-    "google-auth-library": "10.9.1",
     "prettier": "3.8.1",
     "typescript": "5.9.3"
   },
@@ -77,23 +82,7 @@
         "optional": false,
         "range": ">=0.7.0 <0.8",
         "tested": "0.7.1"
-      },
-      "google-auth-library": {
-        "artifactImports": [
-          "google-auth-library"
-        ],
-        "buildExternals": [
-          "google-auth-library",
-          "google-auth-library/*"
-        ],
-        "optional": false,
-        "range": ">=10.0.0 <11",
-        "tested": "10.9.1"
       }
     }
-  },
-  "dependencies": {
-    "@absolutejs/manifest": "0.7.2",
-    "@sinclair/typebox": "^0.34.0"
   }
 }

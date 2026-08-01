@@ -34,9 +34,14 @@ describe("APNs push adapter", () => {
     });
     const dispatcher = createDispatcher({ push: adapter });
     const result = await dispatcher.push({
+      actions: [
+        { id: "open", label: "Open", deepLink: "absolute://deployments/1" },
+      ],
+      badge: 2,
       body: "Build completed",
       data: { projectId: "project-1" },
-      metadata: { badge: 2, sound: "default" },
+      deepLink: "absolute://deployments/1",
+      sound: "default",
       title: "Deployment ready",
       to: "device-token",
     });
@@ -49,6 +54,10 @@ describe("APNs push adapter", () => {
       path: "/3/device/device-token",
     });
     expect(JSON.parse(requests[0]!.payload)).toEqual({
+      absoluteActions: [
+        { deepLink: "absolute://deployments/1", id: "open", label: "Open" },
+      ],
+      absoluteDeepLink: "absolute://deployments/1",
       aps: {
         alert: { body: "Build completed", title: "Deployment ready" },
         badge: 2,

@@ -10,8 +10,11 @@
 	"author": "Alex Kahn",
 	"workspaces": [
 		"apns",
+		"aws-end-user-messaging",
 		"fcm",
+		"infobip",
 		"postmark",
+		"push-postgres",
 		"resend",
 		"sinch",
 		"telnyx",

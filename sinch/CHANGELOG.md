@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 — 2026-08-01
+
+- Require Dispatch and Compliance 0.7 as the single current ecosystem contract.
+
 ## 0.2.0 — 2026-08-01
 
 - Use registered Conversation webhooks instead of per-message callback

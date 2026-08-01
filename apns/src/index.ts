@@ -238,22 +238,30 @@ export const createApnsAdapter = (
                   ? { body: message.body }
                   : { body: message.body, title: message.title },
             }),
-        ...(numberMetadata(metadata, "badge") !== undefined
-          ? { badge: numberMetadata(metadata, "badge") }
+        ...(message.badge !== undefined ||
+        numberMetadata(metadata, "badge") !== undefined
+          ? { badge: message.badge ?? numberMetadata(metadata, "badge") }
           : {}),
         ...(stringMetadata(metadata, "category")
           ? { category: stringMetadata(metadata, "category") }
           : {}),
         ...(contentAvailable ? { "content-available": 1 } : {}),
         ...(mutableContent ? { "mutable-content": 1 } : {}),
-        ...(stringMetadata(metadata, "sound")
-          ? { sound: stringMetadata(metadata, "sound") }
+        ...(message.sound || stringMetadata(metadata, "sound")
+          ? { sound: message.sound ?? stringMetadata(metadata, "sound") }
           : {}),
         ...(stringMetadata(metadata, "threadId")
           ? { "thread-id": stringMetadata(metadata, "threadId") }
           : {}),
       };
-      const payload = JSON.stringify({ ...(message.data ?? {}), aps });
+      const payload = JSON.stringify({
+        ...(message.data ?? {}),
+        ...(message.actions?.length
+          ? { absoluteActions: message.actions }
+          : {}),
+        ...(message.deepLink ? { absoluteDeepLink: message.deepLink } : {}),
+        aps,
+      });
       if (Buffer.byteLength(payload) > MAX_PAYLOAD_BYTES)
         throw new Error(
           `[dispatch-apns] payload exceeds ${MAX_PAYLOAD_BYTES} bytes`,

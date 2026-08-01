@@ -26,8 +26,13 @@ describe("FCM push adapter", () => {
       projectId: "site",
     });
     const result = await createDispatcher({ push: adapter }).push({
+      actions: [
+        { id: "open", label: "Open", deepLink: "absolute://deployments/1" },
+      ],
       body: "Build completed",
       data: { attempts: 2, projectId: "project-1" },
+      deepLink: "https://example.com/deployments/1",
+      sound: "default",
       title: "Deployment ready",
       to: "device-token",
     });
@@ -44,9 +49,24 @@ describe("FCM push adapter", () => {
     );
     expect(requests[0]?.body).toEqual({
       message: {
-        data: { attempts: "2", projectId: "project-1" },
+        android: {
+          notification: {
+            click_action: "https://example.com/deployments/1",
+            sound: "default",
+          },
+        },
+        data: {
+          absoluteActions:
+            '[{"id":"open","label":"Open","deepLink":"absolute://deployments/1"}]',
+          absoluteDeepLink: "https://example.com/deployments/1",
+          attempts: "2",
+          projectId: "project-1",
+        },
         notification: { body: "Build completed", title: "Deployment ready" },
         token: "device-token",
+        webpush: {
+          fcm_options: { link: "https://example.com/deployments/1" },
+        },
       },
     });
   });

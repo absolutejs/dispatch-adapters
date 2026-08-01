@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.0] — 2026-08-01
+
+- Require the unified Dispatch 0.7 contract for email and effect delivery.
+
 ## [0.2.1] — 2026-07-21
 
 - Keep local verifier and signing fixtures visibly synthetic so repository
