@@ -3,6 +3,7 @@ import { createDispatcher } from "@absolutejs/dispatch";
 import { Twilio } from "twilio";
 import {
   createTwilioAdapter,
+  createMemoryTwilioIdempotencyStore,
   TwilioConfigurationError,
   TwilioSendError,
   type TwilioClientLike,
@@ -102,6 +103,62 @@ describe("createTwilioAdapter", () => {
       smartEncoded: true,
       validityPeriod: 300,
     });
+  });
+
+  test("sends media, templates, schedules, and tenant-routed WhatsApp", async () => {
+    const base = makeMockTwilio();
+    const tenant = makeMockTwilio();
+    const tenantServiceSid = `MG${"9".repeat(32)}`;
+    const sendAt = new Date(Date.now() + 3_600_000).toISOString();
+    const adapter = createTwilioAdapter({
+      client: base.client,
+      messagingServiceSid: SERVICE_SID,
+      resolveTenant: () => ({
+        client: tenant.client,
+        messagingServiceSid: tenantServiceSid,
+      }),
+      statusCallbackUrl: CALLBACK,
+    });
+    await adapter.send({
+      channel: "whatsapp",
+      mediaUrls: ["https://cdn.example.com/image.jpg"],
+      sendAt,
+      template: {
+        id: `HX${"8".repeat(32)}`,
+        variables: { "1": "Alex" },
+      },
+      tenant: "tenant-1",
+      to: "whatsapp:+12025550100",
+    });
+    expect(base.calls).toHaveLength(0);
+    expect(tenant.calls[0]).toMatchObject({
+      contentSid: `HX${"8".repeat(32)}`,
+      contentVariables: JSON.stringify({ "1": "Alex" }),
+      mediaUrl: ["https://cdn.example.com/image.jpg"],
+      messagingServiceSid: tenantServiceSid,
+      scheduleType: "fixed",
+      to: "whatsapp:+12025550100",
+    });
+    expect(tenant.calls[0]?.sendAt?.toISOString()).toBe(sendAt);
+  });
+
+  test("deduplicates retry-safe sends with an atomic idempotency store", async () => {
+    const mock = makeMockTwilio();
+    const adapter = createTwilioAdapter({
+      client: mock.client,
+      idempotencyStore: createMemoryTwilioIdempotencyStore(),
+      messagingServiceSid: SERVICE_SID,
+      statusCallbackUrl: CALLBACK,
+    });
+    const message = {
+      body: "once",
+      idempotencyKey: "alert:incident-1:user-1",
+      to: "+12025550100",
+    };
+    const first = await adapter.send(message);
+    const retry = await adapter.send(message);
+    expect(retry).toEqual(first);
+    expect(mock.calls).toHaveLength(1);
   });
 
   test.each([

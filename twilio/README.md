@@ -17,7 +17,7 @@ bun add @absolutejs/dispatch @absolutejs/dispatch-twilio twilio
 
 ## Send alerts
 
-`0.1.0` deliberately requires a Messaging Service and a public status callback.
+The adapter deliberately requires a Messaging Service and a public status callback.
 Every message therefore stays inside the service's sender pool, campaign, and
 opt-out policy.
 
@@ -50,6 +50,39 @@ const result = await dispatcher.sms({
 console.log(result.id); // SM...
 ```
 
+The dispatch contract also supports MMS media, WhatsApp destinations, Twilio
+Content templates, scheduled sends, and durable idempotency keys:
+
+```ts
+import {
+  createPostgresTwilioIdempotencyStore,
+  TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA,
+} from "@absolutejs/dispatch-twilio";
+
+const idempotencyStore = createPostgresTwilioIdempotencyStore(postgres);
+const adapter = createTwilioAdapter({
+  client,
+  idempotencyStore,
+  messagingServiceSid,
+  statusCallbackUrl,
+  resolveTenant: (tenant) => tenantTwilioConfiguration(tenant),
+});
+
+await adapter.send({
+  channel: "whatsapp",
+  idempotencyKey: "incident-42:opened",
+  template: { id: "HX...", variables: { incident: "42" } },
+  tenant: "tenant-a",
+  to: "whatsapp:+12025550100",
+});
+```
+
+Apply `TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA` once before using the supplied
+Postgres store. A key is claimed atomically before Twilio is called; completed
+results are replayed and active claims fail with
+`TwilioIdempotencyInFlightError`. Use a stable business-operation key, not a
+random value generated on every retry.
+
 A per-message `from` may pin a sender, but the Messaging Service SID is still
 sent. Twilio will require that number to belong to the service's sender pool.
 Destinations and explicit senders must use E.164 format. `validityPeriod` must
@@ -71,6 +104,9 @@ const lifecycleStore: TwilioLifecycleStore = durableLifecycleStore;
 
 const handleTwilioWebhook = createTwilioWebhookHandler({
   authToken: process.env.TWILIO_AUTH_TOKEN!,
+  expectedAccountSid: process.env.TWILIO_ACCOUNT_SID!,
+  expectedMessagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
+  publicUrl: "https://app.example.com/webhooks/twilio/messaging",
   store: lifecycleStore,
   onEvent: async (event) => {
     if (event.kind === "status") {
@@ -80,8 +116,14 @@ const handleTwilioWebhook = createTwilioWebhookHandler({
       return;
     }
 
-    // Twilio Advanced Opt-Out emits STOP, START, or HELP as OptOutType.
-    await consent.record(event);
+    if (event.kind === "consent") {
+      // Twilio Advanced Opt-Out emits STOP, START, or HELP as OptOutType.
+      await consent.record(event);
+      return;
+    }
+
+    // Ordinary inbound SMS/MMS/WhatsApp replies include normalized media.
+    await inbox.record(event);
   },
 });
 
@@ -91,9 +133,9 @@ app.post("/webhooks/twilio/messaging", ({ request }) =>
 );
 ```
 
-If a trusted reverse proxy changes the request URL, supply
-`resolvePublicUrl(request)` to reconstruct the exact URL Twilio signed. Never
-derive that URL from untrusted forwarded headers.
+`publicUrl` is fixed configuration and is the exact HTTPS URL Twilio signs.
+The handler does not trust forwarded host/protocol headers. It also binds each
+request to the expected account and, when supplied, Messaging Service.
 
 ### Durable lifecycle store
 
@@ -122,7 +164,9 @@ webhook system can make an external side effect and an inbox commit atomic
 without shared storage.
 
 `createMemoryTwilioLifecycleStore()` is supplied for tests and local
-development. The readiness checker always rejects it for production.
+development. For production, apply `TWILIO_LIFECYCLE_POSTGRES_SCHEMA` and use
+`createPostgresTwilioLifecycleStore(postgres)`. The readiness checker always
+rejects memory storage.
 
 Use `createTwilioWebhookProcessor()` instead of the Response-returning handler
 when a framework needs control over its own response format.
@@ -130,12 +174,17 @@ when a framework needs control over its own response format.
 ## Operational readiness
 
 ```ts
-import { checkTwilioMessagingReadiness } from "@absolutejs/dispatch-twilio";
+import { inspectTwilioMessagingReadiness } from "@absolutejs/dispatch-twilio";
 
-const report = checkTwilioMessagingReadiness({
+const report = await inspectTwilioMessagingReadiness({
+  client,
+  expectedAccountSid: process.env.TWILIO_ACCOUNT_SID!,
+  inboundWebhookUrl: "https://app.example.com/webhooks/twilio/inbound",
+  messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
+  requiresUsA2PRegistration: true,
+  statusCallbackUrl: "https://app.example.com/webhooks/twilio/messaging",
   store: lifecycleStore,
   assertions: {
-    carrierRegistrationApproved: true,
     consentEvidenceStored: true,
     optOutConfigured: true,
     privacyPolicyPublished: true,
@@ -146,8 +195,10 @@ const report = checkTwilioMessagingReadiness({
 if (!report.ready) throw new Error("Twilio messaging is not production ready");
 ```
 
-These are operator assertions, not remotely verified facts. The report scope is
-always `operational-not-legal-certification`.
+This API inspects the Messaging Service/account binding, inbound POST URL,
+status callback, sender pool, and optional US A2P attachment using Twilio's API.
+Consent, Advanced Opt-Out testing, privacy, and terms remain operator
+assertions. The report scope is always `operational-not-legal-certification`.
 
 Before production, configure and test a Twilio Messaging Service, its sender
 pool, applicable carrier registration (such as US A2P 10DLC), Advanced Opt-Out,

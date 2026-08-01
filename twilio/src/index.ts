@@ -1,16 +1,27 @@
 export {
   createTwilioAdapter,
   TwilioConfigurationError,
+  TwilioIdempotencyInFlightError,
   TwilioSendError,
   type CreateTwilioAdapterOptions,
   type TwilioClientLike,
   type TwilioMessageCreateParams,
+  type TwilioTenantConfiguration,
 } from "./adapter";
+export {
+  createMemoryTwilioIdempotencyStore,
+  createPostgresTwilioIdempotencyStore,
+  TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA,
+  type TwilioIdempotencyClaim,
+  type TwilioIdempotencyStore,
+} from "./idempotency";
 export {
   classifyTwilioStatusTransition,
   createMemoryTwilioLifecycleStore,
   TWILIO_MESSAGE_STATUSES,
   type TwilioConsentEvent,
+  type TwilioInboundEvent,
+  type TwilioInboundMedia,
   type TwilioLifecycleDisposition,
   type TwilioLifecycleClaim,
   type TwilioLifecycleStore,
@@ -20,7 +31,14 @@ export {
   type TwilioWebhookEvent,
 } from "./lifecycle";
 export {
+  createPostgresTwilioLifecycleStore,
+  TWILIO_LIFECYCLE_POSTGRES_SCHEMA,
+  type TwilioPostgresClient,
+} from "./postgresLifecycle";
+export {
   checkTwilioMessagingReadiness,
+  inspectTwilioMessagingReadiness,
+  type TwilioMessagingInspectorClientLike,
   type TwilioOperationalAssertions,
   type TwilioReadinessCheck,
   type TwilioReadinessReport,

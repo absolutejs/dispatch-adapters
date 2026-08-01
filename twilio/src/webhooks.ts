@@ -2,6 +2,7 @@ import twilio from "twilio";
 import {
   TWILIO_MESSAGE_STATUSES,
   type TwilioConsentEvent,
+  type TwilioInboundEvent,
   type TwilioLifecycleClaim,
   type TwilioLifecycleStore,
   type TwilioMessageStatus,
@@ -12,11 +13,15 @@ import {
 
 export type CreateTwilioWebhookHandlerOptions = {
   authToken: string;
+  expectedAccountSid: string;
+  expectedMessagingServiceSid?: string;
+  /** Exact public HTTPS callback URL configured in Twilio. */
+  publicUrl: string;
   store: TwilioLifecycleStore;
   /** Called only after an event is atomically accepted by the store. */
   onEvent: (event: TwilioWebhookEvent) => Promise<void> | void;
-  /** Resolve the exact public URL Twilio signed when behind a trusted proxy. */
-  resolvePublicUrl?: (request: Request) => string;
+  /** Maximum accepted form body. Defaults to 64 KiB. */
+  maxBodyBytes?: number;
 };
 
 export type TwilioWebhookProcessingResult = TwilioLifecycleClaim & {
@@ -35,6 +40,7 @@ export class TwilioWebhookError extends Error {
 
 const MESSAGE_SID = /^SM[0-9a-fA-F]{32}$/;
 const ACCOUNT_SID = /^AC[0-9a-fA-F]{32}$/;
+const MESSAGING_SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
 const STATUS_SET = new Set<string>(TWILIO_MESSAGE_STATUSES);
 const OPT_OUT_TYPES = new Set<string>(["HELP", "START", "STOP"]);
 
@@ -82,6 +88,26 @@ export const parseTwilioWebhookEvent = (
   }
 
   const status = raw.MessageStatus ?? raw.SmsStatus;
+  if (status === undefined && raw.From !== undefined && raw.To !== undefined) {
+    const count = Number(raw.NumMedia ?? "0");
+    if (!Number.isInteger(count) || count < 0 || count > 10) {
+      throw new TwilioWebhookError("invalid Twilio NumMedia", 400);
+    }
+    const media = Array.from({ length: count }, (_, index) => ({
+      ...(raw[`MediaContentType${index}`] === undefined
+        ? {}
+        : { contentType: raw[`MediaContentType${index}`] }),
+      url: required(raw, `MediaUrl${index}`),
+    }));
+    return {
+      ...shared,
+      ...(raw.Body === undefined ? {} : { body: raw.Body }),
+      eventId: `inbound:${shared.messageSid}`,
+      kind: "inbound",
+      media,
+      raw,
+    } satisfies TwilioInboundEvent;
+  }
   if (status === undefined || !STATUS_SET.has(status)) {
     throw new TwilioWebhookError("unsupported Twilio messaging webhook", 400);
   }
@@ -103,7 +129,7 @@ export const parseTwilioWebhookEvent = (
   } satisfies TwilioStatusEvent;
 };
 
-const readForm = async (request: Request) => {
+const readForm = async (request: Request, maxBodyBytes: number) => {
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0];
   if (mediaType !== "application/x-www-form-urlencoded") {
     throw new TwilioWebhookError(
@@ -111,7 +137,14 @@ const readForm = async (request: Request) => {
       415,
     );
   }
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+    throw new TwilioWebhookError("Twilio webhook body is too large", 413);
+  }
   const body = await request.text();
+  if (new TextEncoder().encode(body).byteLength > maxBodyBytes) {
+    throw new TwilioWebhookError("Twilio webhook body is too large", 413);
+  }
   const search = new URLSearchParams(body);
   const params: Record<string, string> = {};
   for (const [key, value] of search) params[key] = value;
@@ -124,24 +157,53 @@ export const createTwilioWebhookProcessor = (
   if (options.authToken.length === 0) {
     throw new TwilioWebhookError("authToken must not be empty", 500);
   }
+  if (!ACCOUNT_SID.test(options.expectedAccountSid)) {
+    throw new TwilioWebhookError("expectedAccountSid must be an AC SID", 500);
+  }
+  if (
+    options.expectedMessagingServiceSid !== undefined &&
+    !MESSAGING_SERVICE_SID.test(options.expectedMessagingServiceSid)
+  ) {
+    throw new TwilioWebhookError(
+      "expectedMessagingServiceSid must be an MG SID",
+      500,
+    );
+  }
+  const publicUrl = new URL(options.publicUrl);
+  if (publicUrl.protocol !== "https:") {
+    throw new TwilioWebhookError("publicUrl must use HTTPS", 500);
+  }
 
   return async (request: Request): Promise<TwilioWebhookProcessingResult> => {
     if (request.method !== "POST") {
       throw new TwilioWebhookError("Twilio webhooks require POST", 405);
     }
-    const params = await readForm(request);
+    const params = await readForm(request, options.maxBodyBytes ?? 64 * 1024);
     const signature = request.headers.get("x-twilio-signature");
     if (signature === null) {
       throw new TwilioWebhookError("missing X-Twilio-Signature", 403);
     }
-    const publicUrl = options.resolvePublicUrl?.(request) ?? request.url;
     if (
-      !twilio.validateRequest(options.authToken, signature, publicUrl, params)
+      !twilio.validateRequest(
+        options.authToken,
+        signature,
+        options.publicUrl,
+        params,
+      )
     ) {
       throw new TwilioWebhookError("invalid Twilio webhook signature", 403);
     }
 
     const event = parseTwilioWebhookEvent(params);
+    if (event.accountSid !== options.expectedAccountSid) {
+      throw new TwilioWebhookError("unexpected Twilio account", 403);
+    }
+    if (
+      options.expectedMessagingServiceSid !== undefined &&
+      params.MessagingServiceSid !== options.expectedMessagingServiceSid
+    ) {
+      throw new TwilioWebhookError("unexpected Twilio Messaging Service", 403);
+    }
     const result = await options.store.begin(event);
     if (result.claimToken !== undefined) {
       try {

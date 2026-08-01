@@ -1,9 +1,15 @@
 import type { SmsAdapter, SmsMessage } from "@absolutejs/dispatch";
+import type { TwilioIdempotencyStore } from "./idempotency";
 
 export type TwilioMessageCreateParams = {
-  body: string;
+  body?: string;
+  contentSid?: string;
+  contentVariables?: string;
   from?: string;
+  mediaUrl?: string[];
   messagingServiceSid: string;
+  scheduleType?: "fixed";
+  sendAt?: Date;
   smartEncoded?: boolean;
   statusCallback: string;
   to: string;
@@ -23,14 +29,26 @@ export type TwilioClientLike = {
 
 export type CreateTwilioAdapterOptions = {
   client: TwilioClientLike;
+  idempotencyStore?: TwilioIdempotencyStore;
   /** Twilio Messaging Service used for every message. */
   messagingServiceSid: string;
+  /** Override service/callback/sender for an isolated tenant account or service. */
+  resolveTenant?: (
+    tenant: string,
+  ) => Promise<TwilioTenantConfiguration> | TwilioTenantConfiguration;
   /** Public callback receiving signed delivery lifecycle events. */
   statusCallbackUrl: string;
   /** Ask Twilio to replace Unicode lookalikes with GSM-7 characters. */
   smartEncoded?: boolean;
   /** Seconds Twilio may keep trying to send. Twilio accepts 1–36,000. */
   validityPeriod?: number;
+};
+
+export type TwilioTenantConfiguration = {
+  client?: TwilioClientLike;
+  from?: string;
+  messagingServiceSid: string;
+  statusCallbackUrl?: string;
 };
 
 export class TwilioConfigurationError extends Error {
@@ -47,8 +65,14 @@ export class TwilioSendError extends Error {
   }
 }
 
+export class TwilioIdempotencyInFlightError extends Error {
+  override name = "TwilioIdempotencyInFlightError";
+}
+
 const E164 = /^\+[1-9]\d{1,14}$/;
+const WHATSAPP = /^whatsapp:\+[1-9]\d{1,14}$/;
 const MESSAGING_SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
+const CONTENT_SID = /^HX[0-9a-fA-F]{32}$/;
 
 const assertConfiguration = (options: CreateTwilioAdapterOptions) => {
   if (!MESSAGING_SERVICE_SID.test(options.messagingServiceSid)) {
@@ -89,18 +113,62 @@ const assertConfiguration = (options: CreateTwilioAdapterOptions) => {
 };
 
 const assertMessage = (message: SmsMessage) => {
-  if (!E164.test(message.to)) {
+  const channel = message.channel ?? "sms";
+  if (
+    (channel === "whatsapp" && !WHATSAPP.test(message.to)) ||
+    (channel !== "whatsapp" && !E164.test(message.to))
+  ) {
     throw new TwilioConfigurationError(
       "SMS recipient must be an E.164 phone number",
     );
   }
-  if (message.from !== undefined && !E164.test(message.from)) {
+  if (
+    message.from !== undefined &&
+    !E164.test(message.from) &&
+    !WHATSAPP.test(message.from)
+  ) {
     throw new TwilioConfigurationError(
       "SMS sender must be an E.164 phone number",
     );
   }
-  if (message.body.trim().length === 0) {
-    throw new TwilioConfigurationError("SMS body must not be empty");
+  if (
+    message.body?.trim().length !== 0 &&
+    message.body === undefined &&
+    message.template === undefined
+  ) {
+    throw new TwilioConfigurationError("message body or template is required");
+  }
+  if (message.body !== undefined && message.body.trim().length === 0) {
+    throw new TwilioConfigurationError("message body must not be empty");
+  }
+  if (
+    message.template !== undefined &&
+    !CONTENT_SID.test(message.template.id)
+  ) {
+    throw new TwilioConfigurationError(
+      "template id must be a Twilio Content SID",
+    );
+  }
+  for (const mediaUrl of message.mediaUrls ?? []) {
+    let parsed: URL;
+    try {
+      parsed = new URL(mediaUrl);
+    } catch {
+      throw new TwilioConfigurationError(
+        "media URLs must be absolute HTTPS URLs",
+      );
+    }
+    if (parsed.protocol !== "https:") {
+      throw new TwilioConfigurationError("media URLs must use HTTPS");
+    }
+  }
+  if (message.sendAt !== undefined) {
+    const sendAt = new Date(message.sendAt);
+    if (Number.isNaN(sendAt.valueOf()) || sendAt.valueOf() <= Date.now()) {
+      throw new TwilioConfigurationError(
+        "sendAt must be a future ISO-8601 time",
+      );
+    }
   }
 };
 
@@ -113,29 +181,96 @@ export const createTwilioAdapter = (
     name: "twilio",
     send: async (message) => {
       assertMessage(message);
-      const params: TwilioMessageCreateParams = {
-        body: message.body,
-        messagingServiceSid: options.messagingServiceSid,
-        statusCallback: options.statusCallbackUrl,
-        to: message.to,
-      };
-      if (message.from !== undefined) params.from = message.from;
-      if (options.smartEncoded !== undefined) {
-        params.smartEncoded = options.smartEncoded;
+      const claim = message.idempotencyKey
+        ? await options.idempotencyStore?.begin(message.idempotencyKey)
+        : undefined;
+      if (message.idempotencyKey && claim === undefined) {
+        throw new TwilioConfigurationError(
+          "idempotencyStore is required when idempotencyKey is set",
+        );
       }
-      if (options.validityPeriod !== undefined) {
-        params.validityPeriod = options.validityPeriod;
+      if (claim?.disposition === "completed") return claim.result;
+      if (claim?.disposition === "in-flight") {
+        throw new TwilioIdempotencyInFlightError(
+          "a send with this idempotency key is already in flight",
+        );
       }
+      const claimToken =
+        claim?.disposition === "claimed" ? claim.token : undefined;
+      try {
+        const tenant =
+          message.tenant === undefined
+            ? undefined
+            : await options.resolveTenant?.(message.tenant);
+        const client = tenant?.client ?? options.client;
+        const messagingServiceSid =
+          tenant?.messagingServiceSid ?? options.messagingServiceSid;
+        const statusCallback =
+          tenant?.statusCallbackUrl ?? options.statusCallbackUrl;
+        assertConfiguration({
+          ...options,
+          messagingServiceSid,
+          statusCallbackUrl: statusCallback,
+        });
+        const params: TwilioMessageCreateParams = {
+          ...(message.body === undefined ? {} : { body: message.body }),
+          ...(message.mediaUrls === undefined
+            ? {}
+            : { mediaUrl: [...message.mediaUrls] }),
+          ...(message.template === undefined
+            ? {}
+            : {
+                contentSid: message.template.id,
+                ...(message.template.variables === undefined
+                  ? {}
+                  : {
+                      contentVariables: JSON.stringify(
+                        message.template.variables,
+                      ),
+                    }),
+              }),
+          messagingServiceSid,
+          statusCallback,
+          to: message.to,
+        };
+        const from = message.from ?? tenant?.from;
+        if (from !== undefined) params.from = from;
+        if (message.sendAt !== undefined) {
+          params.scheduleType = "fixed";
+          params.sendAt = new Date(message.sendAt);
+        }
+        if (options.smartEncoded !== undefined) {
+          params.smartEncoded = options.smartEncoded;
+        }
+        if (options.validityPeriod !== undefined) {
+          params.validityPeriod = options.validityPeriod;
+        }
 
-      const response = await options.client.messages.create(params);
-      if (response.errorCode !== null && response.errorCode !== undefined) {
-        throw new TwilioSendError(response.errorCode, response.errorMessage);
+        const response = await client.messages.create(params);
+        if (response.errorCode !== null && response.errorCode !== undefined) {
+          throw new TwilioSendError(response.errorCode, response.errorMessage);
+        }
+        const result = {
+          at: Date.now(),
+          ...(response.sid === undefined ? {} : { id: response.sid }),
+          provider: "twilio",
+        };
+        if (message.idempotencyKey && claimToken) {
+          await options.idempotencyStore?.complete(
+            message.idempotencyKey,
+            claimToken,
+            result,
+          );
+        }
+        return result;
+      } catch (error) {
+        if (message.idempotencyKey && claimToken) {
+          await options.idempotencyStore
+            ?.release(message.idempotencyKey, claimToken)
+            .catch(() => undefined);
+        }
+        throw error;
       }
-      return {
-        at: Date.now(),
-        ...(response.sid === undefined ? {} : { id: response.sid }),
-        provider: "twilio",
-      };
     },
   };
 };

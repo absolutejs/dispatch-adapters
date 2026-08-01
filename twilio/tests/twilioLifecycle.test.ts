@@ -3,6 +3,7 @@ import {
   checkTwilioMessagingReadiness,
   classifyTwilioStatusTransition,
   createMemoryTwilioLifecycleStore,
+  inspectTwilioMessagingReadiness,
   type TwilioLifecycleStore,
 } from "../src";
 
@@ -57,5 +58,59 @@ describe("readiness", () => {
         store,
       }).ready,
     ).toBe(false);
+  });
+
+  test("inspects the live Messaging Service configuration", async () => {
+    const store: TwilioLifecycleStore = {
+      begin: async () => ({ claimToken: "claim", disposition: "accepted" }),
+      complete: async () => {},
+      durability: "durable",
+      release: async () => {},
+    };
+    const accountSid = `AC${"1".repeat(32)}`;
+    const messagingServiceSid = `MG${"2".repeat(32)}`;
+    const inboundWebhookUrl = "https://app.example.com/twilio/inbound";
+    const statusCallbackUrl = "https://app.example.com/twilio/status";
+    const report = await inspectTwilioMessagingReadiness({
+      assertions: {
+        consentEvidenceStored: true,
+        optOutConfigured: true,
+        privacyPolicyPublished: true,
+        termsPublished: true,
+      },
+      client: {
+        messaging: {
+          v1: {
+            services: () => ({
+              channelSenders: { list: async () => [] },
+              fetch: async () => ({
+                accountSid,
+                inboundMethod: "POST",
+                inboundRequestUrl: inboundWebhookUrl,
+                sid: messagingServiceSid,
+                statusCallback: statusCallbackUrl,
+                usAppToPersonRegistered: true,
+              }),
+              phoneNumbers: { list: async () => [{}] },
+              shortCodes: { list: async () => [] },
+            }),
+          },
+        },
+      },
+      expectedAccountSid: accountSid,
+      inboundWebhookUrl,
+      messagingServiceSid,
+      requiresUsA2PRegistration: true,
+      statusCallbackUrl,
+      store,
+    });
+
+    expect(report.ready).toBe(true);
+    expect(report.checks).toContainEqual({
+      id: "sender-pool",
+      message: "Messaging Service has at least one sender",
+      source: "twilio-api",
+      status: "pass",
+    });
   });
 });

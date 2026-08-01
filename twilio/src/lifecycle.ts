@@ -37,7 +37,22 @@ export type TwilioConsentEvent = TwilioWebhookEventBase & {
   raw: Readonly<Record<string, string>>;
 };
 
-export type TwilioWebhookEvent = TwilioConsentEvent | TwilioStatusEvent;
+export type TwilioInboundMedia = {
+  contentType?: string;
+  url: string;
+};
+
+export type TwilioInboundEvent = TwilioWebhookEventBase & {
+  body?: string;
+  kind: "inbound";
+  media: ReadonlyArray<TwilioInboundMedia>;
+  raw: Readonly<Record<string, string>>;
+};
+
+export type TwilioWebhookEvent =
+  | TwilioConsentEvent
+  | TwilioInboundEvent
+  | TwilioStatusEvent;
 export type TwilioLifecycleDisposition = "accepted" | "duplicate" | "stale";
 
 export type TwilioLifecycleClaim = {
@@ -132,7 +147,7 @@ export const createMemoryTwilioLifecycleStore = (): TwilioLifecycleStore => {
         return { claimToken, disposition: "duplicate" };
       }
 
-      if (event.kind === "consent") {
+      if (event.kind !== "status") {
         const claimToken = `memory-claim-${nextClaim++}`;
         events.set(event.eventId, { claimToken, complete: false });
         return { claimToken, disposition: "accepted" };

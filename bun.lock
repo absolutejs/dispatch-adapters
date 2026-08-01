@@ -84,13 +84,13 @@
     },
     "twilio": {
       "name": "@absolutejs/dispatch-twilio",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@absolutejs/manifest": "0.7.2",
         "@sinclair/typebox": "^0.34.0",
       },
       "devDependencies": {
-        "@absolutejs/dispatch": "0.1.1",
+        "@absolutejs/dispatch": "0.2.0",
         "@types/bun": "1.3.14",
         "prettier": "3.8.1",
         "twilio": "6.0.2",
@@ -292,6 +292,8 @@
     "@absolutejs/dispatch-resend/prettier": ["prettier@3.5.3", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-QQtaxnoDJeAkDvDKWCLiwIXkTgRhwYDEQCghU9Z6q03iyek/rxRh/2lC3HB7P8sWT2xC/y5JDctPLBIGzHKbhw=="],
 
     "@absolutejs/dispatch-resend/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@absolutejs/dispatch-twilio/@absolutejs/dispatch": ["@absolutejs/dispatch@0.2.0", "", { "dependencies": { "@absolutejs/manifest": "^0.7.2", "@absolutejs/telemetry": "^0.2.0", "@sinclair/typebox": "^0.34.0" }, "peerDependencies": { "@absolutejs/audit": ">= 0.0.1" }, "optionalPeers": ["@absolutejs/audit"] }, "sha512-6gOdSPr0KxyL7cXikRFA60twJPy2jtTtPlFgg+n5aU8jghHMQVhnbBjkJn2LBWqch1ayDPObehLG84TRuE0Cmw=="],
 
     "@absolutejs/dispatch-twilio/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 

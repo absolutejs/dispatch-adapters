@@ -13,6 +13,7 @@ const URL = "https://app.example.com/webhooks/twilio/messaging";
 // not mistake a source fixture for a live Twilio credential.
 const ACCOUNT_SID = `AC${"0".repeat(32)}`;
 const MESSAGE_SID = "SM0123456789abcdef0123456789abcdef";
+const SERVICE_SID = `MG${"1".repeat(32)}`;
 
 const signedRequest = (
   params: Record<string, string>,
@@ -37,10 +38,12 @@ describe("Twilio webhook processing", () => {
     const events: TwilioWebhookEvent[] = [];
     const process = createTwilioWebhookProcessor({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: (event) => {
         events.push(event);
       },
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const result = await process(
       signedRequest({
@@ -65,10 +68,12 @@ describe("Twilio webhook processing", () => {
     const events: TwilioWebhookEvent[] = [];
     const process = createTwilioWebhookProcessor({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: (event) => {
         events.push(event);
       },
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const params = {
       AccountSid: ACCOUNT_SID,
@@ -92,10 +97,12 @@ describe("Twilio webhook processing", () => {
       const events: TwilioWebhookEvent[] = [];
       const process = createTwilioWebhookProcessor({
         authToken: AUTH_TOKEN,
+        expectedAccountSid: ACCOUNT_SID,
         onEvent: (event) => {
           events.push(event);
         },
         store: createMemoryTwilioLifecycleStore(),
+        publicUrl: URL,
       });
       await process(
         signedRequest({
@@ -111,13 +118,70 @@ describe("Twilio webhook processing", () => {
     },
   );
 
+  test("normalizes ordinary inbound replies and media", async () => {
+    const events: TwilioWebhookEvent[] = [];
+    const process = createTwilioWebhookProcessor({
+      authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
+      expectedMessagingServiceSid: SERVICE_SID,
+      onEvent: (event) => {
+        events.push(event);
+      },
+      publicUrl: URL,
+      store: createMemoryTwilioLifecycleStore(),
+    });
+    await process(
+      signedRequest({
+        AccountSid: ACCOUNT_SID,
+        Body: "A photo",
+        From: "+12025550100",
+        MediaContentType0: "image/jpeg",
+        MediaUrl0: "https://api.twilio.com/media/one",
+        MessageSid: MESSAGE_SID,
+        MessagingServiceSid: SERVICE_SID,
+        NumMedia: "1",
+        To: "+12025550199",
+      }),
+    );
+    expect(events[0]).toMatchObject({
+      body: "A photo",
+      kind: "inbound",
+      media: [
+        { contentType: "image/jpeg", url: "https://api.twilio.com/media/one" },
+      ],
+    });
+  });
+
+  test("rejects callbacks from a different account", async () => {
+    const handler = createTwilioWebhookHandler({
+      authToken: AUTH_TOKEN,
+      expectedAccountSid: `AC${"9".repeat(32)}`,
+      onEvent: () => {},
+      publicUrl: URL,
+      store: createMemoryTwilioLifecycleStore(),
+    });
+    expect(
+      (
+        await handler(
+          signedRequest({
+            AccountSid: ACCOUNT_SID,
+            MessageSid: MESSAGE_SID,
+            MessageStatus: "sent",
+          }),
+        )
+      ).status,
+    ).toBe(403);
+  });
+
   test("rejects forged callbacks before parsing", async () => {
     const handler = createTwilioWebhookHandler({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: () => {
         throw new Error("must not run");
       },
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const response = await handler(
       signedRequest(
@@ -132,13 +196,14 @@ describe("Twilio webhook processing", () => {
     expect(response.status).toBe(403);
   });
 
-  test("supports an exact externally resolved URL behind a trusted proxy", async () => {
+  test("uses the fixed public URL behind a trusted proxy", async () => {
     const internalUrl = "http://internal:3000/webhooks/twilio/messaging";
     const process = createTwilioWebhookProcessor({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: () => {},
-      resolvePublicUrl: () => URL,
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const request = signedRequest(
       {
@@ -156,11 +221,13 @@ describe("Twilio webhook processing", () => {
     let attempts = 0;
     const handler = createTwilioWebhookHandler({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: () => {
         attempts += 1;
         if (attempts === 1) throw new Error("database unavailable");
       },
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const params = {
       AccountSid: ACCOUNT_SID,
@@ -177,6 +244,7 @@ describe("Twilio webhook processing", () => {
     let failSent = true;
     const process = createTwilioWebhookProcessor({
       authToken: AUTH_TOKEN,
+      expectedAccountSid: ACCOUNT_SID,
       onEvent: (event) => {
         if (event.kind !== "status") return;
         if (event.status === "sent" && failSent) {
@@ -186,6 +254,7 @@ describe("Twilio webhook processing", () => {
         delivered.push(event.status);
       },
       store: createMemoryTwilioLifecycleStore(),
+      publicUrl: URL,
     });
     const base = { AccountSid: ACCOUNT_SID, MessageSid: MESSAGE_SID };
     await expect(

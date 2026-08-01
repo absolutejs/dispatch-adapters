@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0] — 2026-08-01
+
+### Messaging
+
+- Add MMS media, WhatsApp, Twilio Content templates, and scheduled sends.
+- Add tenant-specific client, Messaging Service, callback, and sender routing.
+- Add atomic memory and Postgres idempotency stores for retry-safe sends.
+
+### Inbound and lifecycle
+
+- Normalize ordinary inbound replies and MMS media alongside delivery and
+  Advanced Opt-Out events.
+- Bind signed webhooks to a fixed public URL, expected account, and optional
+  Messaging Service with bounded request bodies.
+- Add a transactional Postgres lifecycle store and installable SQL schemas.
+
+### Readiness
+
+- Inspect the configured Twilio account/service binding, inbound POST URL,
+  status callback, sender pool, and optional US A2P attachment via Twilio's API.
+- Keep consent, opt-out testing, privacy, and terms as explicit operator
+  assertions rather than claiming legal certification.
+
 ## [0.1.0] — 2026-07-31
 
 Production messaging lifecycle release. This intentionally replaces the
