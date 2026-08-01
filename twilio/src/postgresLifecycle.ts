@@ -97,7 +97,7 @@ export const createPostgresTwilioLifecycleStore = (
         );
         await client.query(
           "SELECT pg_advisory_xact_lock(hashtextextended($1, 1))",
-          [event.messageSid],
+          [event.messageId],
         );
         const existingResult = await client.query(
           "SELECT claim_token, claimed_until_ms, completed_at_ms FROM absolute_twilio_webhook_events_v2 WHERE event_id = $1 FOR UPDATE",
@@ -122,10 +122,10 @@ export const createPostgresTwilioLifecycleStore = (
         let disposition: "accepted" | "duplicate" | "stale" = existing
           ? "duplicate"
           : "accepted";
-        if (event.kind === "status") {
+        if (event.kind === "delivery") {
           const statusResult = await client.query(
             "SELECT status FROM absolute_twilio_message_status_v2 WHERE message_sid = $1 FOR UPDATE",
-            [event.messageSid],
+            [event.messageId],
           );
           previousStatus = statusResult.rows[0]?.status as
             | TwilioMessageStatus
@@ -133,12 +133,14 @@ export const createPostgresTwilioLifecycleStore = (
           if (!existing) {
             disposition = classifyTwilioStatusTransition(
               previousStatus,
-              event.status,
+              event.providerStatus,
             );
           } else if (
-            previousStatus !== event.status &&
-            classifyTwilioStatusTransition(previousStatus, event.status) ===
-              "stale"
+            previousStatus !== event.providerStatus &&
+            classifyTwilioStatusTransition(
+              previousStatus,
+              event.providerStatus,
+            ) === "stale"
           ) {
             disposition = "stale";
           }
@@ -155,11 +157,11 @@ export const createPostgresTwilioLifecycleStore = (
                disposition = 'stale'`,
             [
               event.eventId,
-              event.messageSid,
+              event.messageId,
               JSON.stringify(storedEvent),
               timestamp,
-              event.receivedAt,
-              event.receivedAt + retentionMs,
+              event.occurredAt,
+              event.occurredAt + retentionMs,
             ],
           );
           return {
@@ -179,22 +181,22 @@ export const createPostgresTwilioLifecycleStore = (
              disposition = EXCLUDED.disposition`,
           [
             event.eventId,
-            event.messageSid,
+            event.messageId,
             JSON.stringify(storedEvent),
             disposition,
             claimToken,
             timestamp + claimTtlMs,
-            event.receivedAt,
-            event.receivedAt + retentionMs,
+            event.occurredAt,
+            event.occurredAt + retentionMs,
           ],
         );
-        if (event.kind === "status" && disposition === "accepted") {
+        if (event.kind === "delivery" && disposition === "accepted") {
           await client.query(
             `INSERT INTO absolute_twilio_message_status_v2 (message_sid, status, updated_at_ms)
              VALUES ($1, $2, $3)
              ON CONFLICT (message_sid) DO UPDATE SET
                status = EXCLUDED.status, updated_at_ms = EXCLUDED.updated_at_ms`,
-            [event.messageSid, event.status, timestamp],
+            [event.messageId, event.providerStatus, timestamp],
           );
         }
         return {
@@ -222,17 +224,18 @@ export const createPostgresTwilioLifecycleStore = (
         const work: TwilioLifecycleWorkItem[] = [];
         for (const row of found.rows) {
           const event = row.payload as TwilioWebhookEvent;
-          if (event.kind === "status") {
+          if (event.kind === "delivery") {
             const status = await client.query(
               "SELECT status FROM absolute_twilio_message_status_v2 WHERE message_sid = $1",
-              [event.messageSid],
+              [event.messageId],
             );
             const current = status.rows[0]?.status as
               | TwilioMessageStatus
               | undefined;
             if (
-              current !== event.status &&
-              classifyTwilioStatusTransition(current, event.status) === "stale"
+              current !== event.providerStatus &&
+              classifyTwilioStatusTransition(current, event.providerStatus) ===
+                "stale"
             ) {
               await client.query(
                 `UPDATE absolute_twilio_webhook_events_v2
@@ -281,11 +284,11 @@ export const createPostgresTwilioLifecycleStore = (
         [eventId, claimToken],
       );
     },
-    exportMessage: async (messageSid) => {
+    exportMessage: async (messageId) => {
       const result = await pool.query(
         `SELECT payload FROM absolute_twilio_webhook_events_v2
          WHERE message_sid = $1 ORDER BY received_at_ms ASC`,
-        [messageSid],
+        [messageId],
       );
       return result.rows.map((row) => row.payload as TwilioWebhookEvent);
     },

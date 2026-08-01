@@ -46,8 +46,8 @@ describe("Telnyx messaging readiness", () => {
       webhookUrl: WEBHOOK,
     });
     expect(report.ready).toBe(false);
-    expect(report.checks.find(({ id }) => id === "rcs-approved")?.ok).toBe(
-      false,
+    expect(report.checks.find(({ id }) => id === "rcs-approved")?.status).toBe(
+      "fail",
     );
   });
 

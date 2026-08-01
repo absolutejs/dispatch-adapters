@@ -124,7 +124,7 @@ describe("Telnyx signed messaging webhooks", () => {
     );
     expect(seen[0]).toMatchObject({
       actualTransport: "rcs",
-      interactivePayload: "incident:ack",
+      interaction: { payload: "incident:ack" },
       kind: "inbound",
     });
   });

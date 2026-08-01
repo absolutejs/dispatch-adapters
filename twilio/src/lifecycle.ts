@@ -1,3 +1,10 @@
+import type {
+  MessagingConsentEvent,
+  MessagingDeliveryEvent,
+  MessagingDeliveryStatus,
+  MessagingInboundEvent,
+} from "@absolutejs/dispatch";
+
 export const TWILIO_MESSAGE_STATUSES = [
   "accepted",
   "scheduled",
@@ -14,46 +21,24 @@ export const TWILIO_MESSAGE_STATUSES = [
 export type TwilioMessageStatus = (typeof TWILIO_MESSAGE_STATUSES)[number];
 export type TwilioOptOutType = "HELP" | "START" | "STOP";
 
-type TwilioWebhookEventBase = {
-  accountSid: string;
-  eventId: string;
-  from?: string;
-  messageSid: string;
-  receivedAt: number;
-  to?: string;
+type TwilioProviderEvent = {
+  provider: "twilio";
+  providerData: Readonly<Record<string, string>>;
 };
 
-export type TwilioStatusEvent = TwilioWebhookEventBase & {
-  /** Actual provider channel. RCS fallback callbacks omit the `rcs` prefix. */
-  actualTransport?: "mms" | "rcs" | "sms" | "whatsapp";
-  errorCode?: number;
-  kind: "status";
-  raw: Readonly<Record<string, string>>;
-  status: TwilioMessageStatus;
-};
+export type TwilioStatusEvent = MessagingDeliveryEvent &
+  TwilioProviderEvent & {
+    errorCode?: number;
+    providerStatus: TwilioMessageStatus;
+    status: MessagingDeliveryStatus;
+  };
 
-export type TwilioConsentEvent = TwilioWebhookEventBase & {
-  body?: string;
-  buttonPayload?: string;
-  buttonText?: string;
-  kind: "consent";
-  optOutType: TwilioOptOutType;
-  raw: Readonly<Record<string, string>>;
-};
+export type TwilioConsentEvent = MessagingConsentEvent &
+  TwilioProviderEvent & {
+    optOutType: TwilioOptOutType;
+  };
 
-export type TwilioInboundMedia = {
-  contentType?: string;
-  url: string;
-};
-
-export type TwilioInboundEvent = TwilioWebhookEventBase & {
-  body?: string;
-  buttonPayload?: string;
-  buttonText?: string;
-  kind: "inbound";
-  media: ReadonlyArray<TwilioInboundMedia>;
-  raw: Readonly<Record<string, string>>;
-};
+export type TwilioInboundEvent = MessagingInboundEvent & TwilioProviderEvent;
 
 export type TwilioWebhookEvent =
   | TwilioConsentEvent
@@ -95,7 +80,7 @@ export type TwilioLifecycleStore = {
   /** Releases a claim after a consumer failure so the event can be retried. */
   release: (eventId: string, claimToken: string) => Promise<void>;
   /** Exports the bounded, redacted stored lifecycle for one provider message. */
-  exportMessage: (messageSid: string) => Promise<TwilioWebhookEvent[]>;
+  exportMessage: (messageId: string) => Promise<TwilioWebhookEvent[]>;
   /** Deletes stored webhook payloads after their configured retention deadline. */
   purgeExpired: (at?: number) => Promise<number>;
 };
@@ -122,18 +107,17 @@ export const redactTwilioWebhookEvent = (
   >,
 ): TwilioWebhookEvent => {
   const copy = structuredClone(event) as TwilioWebhookEvent;
-  if (options.retainRaw !== true) copy.raw = Object.freeze({});
+  if (options.retainRaw !== true) copy.providerData = Object.freeze({});
   if (options.retainAddresses === false) {
     delete copy.from;
     delete copy.to;
   }
   if (options.retainContent === false) {
-    if (copy.kind === "inbound" || copy.kind === "consent") {
-      delete copy.body;
-      delete copy.buttonPayload;
-      delete copy.buttonText;
+    if (copy.kind === "inbound") {
+      copy.content = { kind: "text", text: "" };
+      delete copy.interaction;
     }
-    if (copy.kind === "inbound") copy.media = [];
+    if (copy.kind === "consent") delete copy.keyword;
   }
   return copy;
 };
@@ -208,12 +192,14 @@ export const createMemoryTwilioLifecycleStore = (
         ) {
           return { disposition: "duplicate" };
         }
-        if (event.kind === "status") {
-          const previousStatus = statuses.get(event.messageSid);
+        if (event.kind === "delivery") {
+          const previousStatus = statuses.get(event.messageId);
           if (
-            previousStatus !== event.status &&
-            classifyTwilioStatusTransition(previousStatus, event.status) ===
-              "stale"
+            previousStatus !== event.providerStatus &&
+            classifyTwilioStatusTransition(
+              previousStatus,
+              event.providerStatus,
+            ) === "stale"
           ) {
             existing.complete = true;
             return {
@@ -228,7 +214,7 @@ export const createMemoryTwilioLifecycleStore = (
         return { claimToken, disposition: "duplicate" };
       }
 
-      if (event.kind !== "status") {
+      if (event.kind !== "delivery") {
         const claimToken = `memory-claim-${nextClaim++}`;
         events.set(event.eventId, {
           claimToken,
@@ -236,18 +222,18 @@ export const createMemoryTwilioLifecycleStore = (
           complete: false,
           disposition: "accepted",
           event: redactTwilioWebhookEvent(event, options),
-          expiresAt: event.receivedAt + retentionMs,
+          expiresAt: event.occurredAt + retentionMs,
         });
         return { claimToken, disposition: "accepted" };
       }
 
-      const previousStatus = statuses.get(event.messageSid);
+      const previousStatus = statuses.get(event.messageId);
       const disposition = classifyTwilioStatusTransition(
         previousStatus,
-        event.status,
+        event.providerStatus,
       );
       if (disposition === "accepted") {
-        statuses.set(event.messageSid, event.status);
+        statuses.set(event.messageId, event.providerStatus);
       }
       const claimToken =
         disposition === "accepted" ? `memory-claim-${nextClaim++}` : undefined;
@@ -259,7 +245,7 @@ export const createMemoryTwilioLifecycleStore = (
         complete: disposition === "stale",
         disposition: "accepted",
         event: redactTwilioWebhookEvent(event, options),
-        expiresAt: event.receivedAt + retentionMs,
+        expiresAt: event.occurredAt + retentionMs,
       });
       return {
         ...(claimToken === undefined ? {} : { claimToken }),
@@ -270,7 +256,7 @@ export const createMemoryTwilioLifecycleStore = (
     claimPending: async (limit = 100) => {
       const work: TwilioLifecycleWorkItem[] = [];
       for (const entry of [...events.values()].sort(
-        (left, right) => left.event.receivedAt - right.event.receivedAt,
+        (left, right) => left.event.occurredAt - right.event.occurredAt,
       )) {
         if (work.length >= limit) break;
         if (
@@ -305,10 +291,10 @@ export const createMemoryTwilioLifecycleStore = (
         delete event.claimedUntil;
       }
     },
-    exportMessage: async (messageSid) =>
+    exportMessage: async (messageId) =>
       [...events.values()]
-        .filter(({ event }) => event.messageSid === messageSid)
-        .sort((left, right) => left.event.receivedAt - right.event.receivedAt)
+        .filter(({ event }) => event.messageId === messageId)
+        .sort((left, right) => left.event.occurredAt - right.event.occurredAt)
         .map(({ event }) => structuredClone(event)),
     purgeExpired: async (at = now()) => {
       let purged = 0;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DispatchResult } from "@absolutejs/dispatch";
+import type { MessagingDispatchResult } from "@absolutejs/dispatch";
 import type { TwilioPostgresPool } from "./postgresLifecycle";
 
 export type TwilioIdempotencyScope = {
@@ -10,7 +10,7 @@ export type TwilioIdempotencyScope = {
 
 export type TwilioIdempotencyOutcome =
   | { kind: "provider-error"; code: number; message?: string }
-  | { kind: "success"; result: DispatchResult };
+  | { kind: "success"; result: MessagingDispatchResult };
 
 export type TwilioIdempotencyClaim =
   | { disposition: "claimed"; token: string }

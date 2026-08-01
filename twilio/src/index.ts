@@ -53,7 +53,6 @@ export {
   TWILIO_MESSAGE_STATUSES,
   type TwilioConsentEvent,
   type TwilioInboundEvent,
-  type TwilioInboundMedia,
   type TwilioLifecycleDisposition,
   type TwilioLifecycleClaim,
   type TwilioLifecycleRetentionOptions,

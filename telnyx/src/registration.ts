@@ -1,4 +1,8 @@
 import type Telnyx from "telnyx";
+import type {
+  MessagingCapabilityReport,
+  MessagingRegistrationCapability,
+} from "@absolutejs/dispatch";
 
 export type TelnyxComplianceClientLike = Pick<
   Telnyx,
@@ -33,12 +37,12 @@ export type TelnyxComplianceInspectionTarget =
   | { brandId: string; campaignId: string; kind: "a2p" }
   | { kind: "toll-free"; verificationRequestId: string };
 
-export type TelnyxComplianceStatusReport = {
+export type TelnyxComplianceStatusReport = MessagingCapabilityReport & {
   checks: Array<{
     detail: string;
     id: string;
-    ok: boolean;
-    status: string;
+    providerStatus: string;
+    status: "fail" | "pass" | "pending";
   }>;
   diagnostics: string[];
   ready: boolean;
@@ -95,113 +99,125 @@ const approved = (status: string) =>
   ["active", "approved", "complete", "completed", "verified"].includes(
     status.toLowerCase(),
   );
+const normalizedStatus = (status: string) =>
+  approved(status)
+    ? ("pass" as const)
+    : ["failed", "rejected", "suspended"].some((value) =>
+          status.toLowerCase().includes(value),
+        )
+      ? ("fail" as const)
+      : ("pending" as const);
 
 export const createTelnyxComplianceManager = (
   client: TelnyxComplianceClientLike,
-) => ({
-  inspect: async (
-    target: TelnyxComplianceInspectionTarget,
-  ): Promise<TelnyxComplianceStatusReport> => {
-    if (target.kind === "a2p") {
-      const [brand, campaign] = await Promise.all([
-        client.messaging10dlc.brand.retrieve(target.brandId),
-        client.messaging10dlc.campaign.retrieve(target.campaignId),
-      ]);
-      const brandStatus = statusOf(brand);
-      const campaignStatus = statusOf(campaign);
+) =>
+  ({
+    inspect: async (
+      target: TelnyxComplianceInspectionTarget,
+    ): Promise<TelnyxComplianceStatusReport> => {
+      if (target.kind === "a2p") {
+        const [brand, campaign] = await Promise.all([
+          client.messaging10dlc.brand.retrieve(target.brandId),
+          client.messaging10dlc.campaign.retrieve(target.campaignId),
+        ]);
+        const brandStatus = statusOf(brand);
+        const campaignStatus = statusOf(campaign);
+        const checks = [
+          {
+            detail: "10DLC brand is approved",
+            id: "brand-approved",
+            providerStatus: brandStatus,
+            status: normalizedStatus(brandStatus),
+          },
+          {
+            detail: "10DLC campaign is approved",
+            id: "campaign-approved",
+            providerStatus: campaignStatus,
+            status: normalizedStatus(campaignStatus),
+          },
+        ];
+        return {
+          checks,
+          diagnostics: [...diagnosticsOf(brand), ...diagnosticsOf(campaign)],
+          ready: checks.every(({ status }) => status === "pass"),
+          target: "a2p",
+        };
+      }
+      const request =
+        await client.messagingTollfree.verification.requests.retrieve(
+          target.verificationRequestId,
+        );
+      const status = statusOf(request);
       const checks = [
         {
-          detail: "10DLC brand is approved",
-          id: "brand-approved",
-          ok: approved(brandStatus),
-          status: brandStatus,
-        },
-        {
-          detail: "10DLC campaign is approved",
-          id: "campaign-approved",
-          ok: approved(campaignStatus),
-          status: campaignStatus,
+          detail: "Toll-free verification is approved",
+          id: "toll-free-approved",
+          providerStatus: status,
+          status: normalizedStatus(status),
         },
       ];
       return {
         checks,
-        diagnostics: [...diagnosticsOf(brand), ...diagnosticsOf(campaign)],
-        ready: checks.every(({ ok }) => ok),
-        target: "a2p",
+        diagnostics: diagnosticsOf(request),
+        ready: checks.every(({ status }) => status === "pass"),
+        target: "toll-free",
       };
-    }
-    const request =
-      await client.messagingTollfree.verification.requests.retrieve(
-        target.verificationRequestId,
-      );
-    const status = statusOf(request);
-    const checks = [
-      {
-        detail: "Toll-free verification is approved",
-        id: "toll-free-approved",
-        ok: approved(status),
-        status,
-      },
-    ];
-    return {
-      checks,
-      diagnostics: diagnosticsOf(request),
-      ready: checks.every(({ ok }) => ok),
-      target: "toll-free",
-    };
-  },
-  submitA2P: async (input: {
-    brand: TelnyxA2PBrandRegistrationInput;
-    campaign: Omit<TelnyxA2PCampaignRegistrationInput, "brandId">;
-  }) => {
-    requireEvidenceUrls(input.brand);
-    requireEvidenceUrls(input.campaign);
-    const {
-      privacyPolicyUrl: _brandPrivacy,
-      termsOfServiceUrl: _brandTerms,
-      ...brandInput
-    } = input.brand;
-    const brand = await client.messaging10dlc.brand.create(brandInput);
-    const brandId = String(row(brand).brandId ?? row(brand).id ?? "");
-    if (!nonEmpty(brandId)) throw new Error("Telnyx did not return a brand id");
-    const {
-      privacyPolicyUrl: _campaignPrivacy,
-      termsOfServiceUrl: _campaignTerms,
-      ...campaignInput
-    } = input.campaign;
-    if (!nonEmpty(campaignInput.messageFlow))
-      throw new TypeError(
-        "campaign.messageFlow must describe the opt-in workflow",
-      );
-    const campaign = await client.messaging10dlc.campaignBuilder.submit({
-      ...campaignInput,
-      brandId,
-    });
-    return { brand, campaign };
-  },
-  submitTollFree: async (input: TelnyxTollFreeVerificationInput) => {
-    requireEvidenceUrls(input);
-    for (const field of [
-      "businessRegistrationCountry",
-      "businessRegistrationNumber",
-      "businessRegistrationType",
-      "optInWorkflow",
-      "productionMessageContent",
-      "useCaseSummary",
-    ] as const) {
-      if (!nonEmpty(input[field])) throw new TypeError(`${field} is required`);
-    }
-    const {
-      privacyPolicyUrl: _privacy,
-      termsOfServiceUrl: _terms,
-      ...request
-    } = input;
-    return client.messagingTollfree.verification.requests.create(request);
-  },
-  updateRejectedTollFree: async (
-    id: string,
-    input: Parameters<
-      TelnyxComplianceClientLike["messagingTollfree"]["verification"]["requests"]["update"]
-    >[1],
-  ) => client.messagingTollfree.verification.requests.update(id, input),
-});
+    },
+    submitA2P: async (input: {
+      brand: TelnyxA2PBrandRegistrationInput;
+      campaign: Omit<TelnyxA2PCampaignRegistrationInput, "brandId">;
+    }) => {
+      requireEvidenceUrls(input.brand);
+      requireEvidenceUrls(input.campaign);
+      const {
+        privacyPolicyUrl: _brandPrivacy,
+        termsOfServiceUrl: _brandTerms,
+        ...brandInput
+      } = input.brand;
+      const brand = await client.messaging10dlc.brand.create(brandInput);
+      const brandId = String(row(brand).brandId ?? row(brand).id ?? "");
+      if (!nonEmpty(brandId))
+        throw new Error("Telnyx did not return a brand id");
+      const {
+        privacyPolicyUrl: _campaignPrivacy,
+        termsOfServiceUrl: _campaignTerms,
+        ...campaignInput
+      } = input.campaign;
+      if (!nonEmpty(campaignInput.messageFlow))
+        throw new TypeError(
+          "campaign.messageFlow must describe the opt-in workflow",
+        );
+      const campaign = await client.messaging10dlc.campaignBuilder.submit({
+        ...campaignInput,
+        brandId,
+      });
+      return { brand, campaign };
+    },
+    submitTollFree: async (input: TelnyxTollFreeVerificationInput) => {
+      requireEvidenceUrls(input);
+      for (const field of [
+        "businessRegistrationCountry",
+        "businessRegistrationNumber",
+        "businessRegistrationType",
+        "optInWorkflow",
+        "productionMessageContent",
+        "useCaseSummary",
+      ] as const) {
+        if (!nonEmpty(input[field]))
+          throw new TypeError(`${field} is required`);
+      }
+      const {
+        privacyPolicyUrl: _privacy,
+        termsOfServiceUrl: _terms,
+        ...request
+      } = input;
+      return client.messagingTollfree.verification.requests.create(request);
+    },
+    updateRejectedTollFree: async (
+      id: string,
+      input: Parameters<
+        TelnyxComplianceClientLike["messagingTollfree"]["verification"]["requests"]["update"]
+      >[1],
+    ) => client.messagingTollfree.verification.requests.update(id, input),
+  }) satisfies MessagingRegistrationCapability<TelnyxComplianceInspectionTarget> &
+    Record<string, unknown>;

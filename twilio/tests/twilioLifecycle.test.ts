@@ -28,24 +28,25 @@ describe("lifecycle transitions", () => {
       retentionMs: 1_000,
     });
     const event = {
-      accountSid: `AC${"1".repeat(32)}`,
-      body: "secret",
+      actualTransport: "sms" as const,
+      content: { kind: "text" as const, text: "secret" },
       eventId: "inbound:test",
-      from: "+12025550100",
+      from: { address: "+12025550100", transport: "sms" as const },
       kind: "inbound" as const,
-      media: [],
-      messageSid: `SM${"2".repeat(32)}`,
-      raw: { Body: "secret", From: "+12025550100" },
-      receivedAt: now,
-      to: "+12025550199",
+      messageId: `SM${"2".repeat(32)}`,
+      occurredAt: now,
+      provider: "twilio" as const,
+      providerAccountId: `AC${"1".repeat(32)}`,
+      providerData: { Body: "secret", From: "+12025550100" },
+      to: { address: "+12025550199", transport: "sms" as const },
     };
     const claim = await store.begin(event);
     await store.complete(event.eventId, claim.claimToken!);
-    expect(await store.exportMessage(event.messageSid)).toEqual([
-      expect.objectContaining({ raw: {} }),
+    expect(await store.exportMessage(event.messageId)).toEqual([
+      expect.objectContaining({ providerData: {} }),
     ]);
-    expect(await store.exportMessage(event.messageSid)).not.toEqual([
-      expect.objectContaining({ body: "secret" }),
+    expect(await store.exportMessage(event.messageId)).not.toEqual([
+      expect.objectContaining({ content: { kind: "text", text: "secret" } }),
     ]);
     now = 2_001;
     expect(await store.purgeExpired()).toBe(1);
@@ -155,13 +156,13 @@ describe("readiness", () => {
     expect(report.ready).toBe(true);
     expect(report.checks).toContainEqual({
       id: "sender-pool",
-      message: "Messaging Service has at least one sender",
+      detail: "Messaging Service has at least one sender",
       source: "twilio-api",
       status: "pass",
     });
     expect(report.checks).toContainEqual({
       id: "rcs-sender",
-      message: "Messaging Service has an RCS sender",
+      detail: "Messaging Service has an RCS sender",
       source: "twilio-api",
       status: "pass",
     });

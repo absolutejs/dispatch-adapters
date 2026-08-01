@@ -1,3 +1,7 @@
+import type {
+  MessagingScheduledMessageReport,
+  MessagingSchedulingCapability,
+} from "@absolutejs/dispatch";
 import { TwilioConfigurationError } from "./adapter";
 
 export type TwilioScheduledMessageStatus =
@@ -30,13 +34,10 @@ export type TwilioScheduledMessageClientLike = {
   };
 };
 
-export type TwilioScheduledMessageReport = {
+export type TwilioScheduledMessageReport = MessagingScheduledMessageReport & {
   errorCode?: number;
   errorMessage?: string;
-  messageSid: string;
   sendAt?: string;
-  state: "canceled" | "failed" | "pending" | "sent";
-  status: TwilioScheduledMessageStatus;
   updatedAt?: string;
 };
 
@@ -81,12 +82,12 @@ const normalize = (
     ...(resource.errorMessage === null || resource.errorMessage === undefined
       ? {}
       : { errorMessage: resource.errorMessage }),
-    messageSid: resource.sid,
+    messageId: resource.sid,
+    providerStatus: status,
     ...(resource.sendAt === null || resource.sendAt === undefined
       ? {}
       : { sendAt: resource.sendAt.toISOString() }),
     state,
-    status,
     ...(resource.dateUpdated === undefined
       ? {}
       : { updatedAt: resource.dateUpdated.toISOString() }),
@@ -104,7 +105,7 @@ const assertSid = (messageSid: string) => {
 /** Cancellation and reconciliation surface for explicitly enabled native schedules. */
 export const createTwilioScheduledMessageManager = (
   client: TwilioScheduledMessageClientLike,
-) => ({
+): MessagingSchedulingCapability => ({
   cancel: async (messageSid: string) => {
     assertSid(messageSid);
     return normalize(

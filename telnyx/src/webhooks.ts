@@ -7,42 +7,22 @@ import {
   drainWebhookInbox,
   type WebhookInboxStore,
 } from "@absolutejs/reliability";
-import type { MessagingTransport } from "@absolutejs/dispatch";
+import type {
+  MessagingConsentEvent,
+  MessagingDeliveryEvent,
+  MessagingDeliveryStatus,
+  MessagingInboundEvent,
+  MessagingTransport,
+} from "@absolutejs/dispatch";
 
-export type TelnyxDeliveryEvent = {
-  actualTransport: MessagingTransport;
-  errors: ReadonlyArray<{ code?: string; detail?: string; title?: string }>;
-  eventId: string;
-  kind: "delivery";
-  messageId: string;
-  occurredAt: number;
-  status: string;
-  to?: string;
+type TelnyxProviderEvent = {
+  provider: "telnyx";
+  providerData: Readonly<Record<string, unknown>>;
 };
 
-export type TelnyxInboundEvent = {
-  actualTransport: MessagingTransport;
-  body?: string;
-  eventId: string;
-  from?: string;
-  interactivePayload?: string;
-  kind: "inbound";
-  media: ReadonlyArray<{ contentType?: string; url: string }>;
-  messageId: string;
-  occurredAt: number;
-  to?: string;
-};
-
-export type TelnyxConsentEvent = {
-  action: "grant" | "help" | "revoke";
-  eventId: string;
-  from: string;
-  keyword: string;
-  kind: "consent";
-  messageId: string;
-  occurredAt: number;
-  transport: MessagingTransport;
-};
+export type TelnyxDeliveryEvent = MessagingDeliveryEvent & TelnyxProviderEvent;
+export type TelnyxInboundEvent = MessagingInboundEvent & TelnyxProviderEvent;
+export type TelnyxConsentEvent = MessagingConsentEvent & TelnyxProviderEvent;
 
 export type TelnyxWebhookEvent =
   | TelnyxConsentEvent
@@ -111,7 +91,22 @@ const addressOf = (value: unknown) => {
   return undefined;
 };
 
-const normalize = (envelope: TelnyxWebhookEnvelope): TelnyxWebhookEvent => {
+const normalizedStatus = (status: string): MessagingDeliveryStatus => {
+  const value = status.toLowerCase();
+  if (value.includes("deliver"))
+    return value.includes("fail") ? "undeliverable" : "delivered";
+  if (value.includes("fail")) return "failed";
+  if (value === "queued" || value === "sending" || value === "sent")
+    return value;
+  if (value === "expired" || value === "read" || value === "scheduled")
+    return value;
+  return "unknown";
+};
+
+const normalize = (
+  envelope: TelnyxWebhookEnvelope,
+  organizationId: string,
+): TelnyxWebhookEvent => {
   const data = envelope.data;
   const eventId = data?.id;
   const payload = data?.payload;
@@ -146,6 +141,13 @@ const normalize = (envelope: TelnyxWebhookEnvelope): TelnyxWebhookEvent => {
           };
         })
       : [];
+    const providerStatus =
+      typeof (firstTo as Record<string, unknown> | undefined)?.status ===
+      "string"
+        ? String((firstTo as Record<string, unknown>).status)
+        : data.event_type === "message.sent"
+          ? "sent"
+          : "unknown";
     return {
       actualTransport,
       errors,
@@ -153,14 +155,14 @@ const normalize = (envelope: TelnyxWebhookEnvelope): TelnyxWebhookEvent => {
       kind: "delivery",
       messageId,
       occurredAt,
-      status:
-        typeof (firstTo as Record<string, unknown> | undefined)?.status ===
-        "string"
-          ? String((firstTo as Record<string, unknown>).status)
-          : data.event_type === "message.sent"
-            ? "sent"
-            : "unknown",
-      ...(to === undefined ? {} : { to }),
+      provider: "telnyx",
+      providerAccountId: organizationId,
+      providerData: payload,
+      providerStatus,
+      status: normalizedStatus(providerStatus),
+      ...(to === undefined
+        ? {}
+        : { to: { address: to, transport: actualTransport } }),
     };
   }
   if (data.event_type !== "message.received") {
@@ -193,24 +195,23 @@ const normalize = (envelope: TelnyxWebhookEnvelope): TelnyxWebhookEvent => {
           ? "help"
           : "revoke",
       eventId,
-      from,
+      from: { address: from, transport: actualTransport },
       keyword,
       kind: "consent",
       messageId,
       occurredAt,
-      transport: actualTransport,
+      provider: "telnyx",
+      providerAccountId: organizationId,
+      providerData: payload,
     };
   }
-  const media = Array.isArray(payload.media)
+  const mediaUrls = Array.isArray(payload.media)
     ? payload.media.flatMap((item) => {
         const row = item as Record<string, unknown>;
         return typeof row.url !== "string"
           ? []
           : [
               {
-                ...(row.content_type === undefined
-                  ? {}
-                  : { contentType: String(row.content_type) }),
                 url: row.url,
               },
             ];
@@ -218,17 +219,30 @@ const normalize = (envelope: TelnyxWebhookEnvelope): TelnyxWebhookEvent => {
     : [];
   return {
     actualTransport,
-    ...(body === undefined ? {} : { body }),
+    content:
+      mediaUrls.length === 0
+        ? { kind: "text", text: body ?? "" }
+        : {
+            kind: "media",
+            mediaUrls: mediaUrls.map(({ url }) => url),
+            ...(body === undefined ? {} : { text: body }),
+          },
     eventId,
-    ...(from === undefined ? {} : { from }),
+    ...(from === undefined
+      ? {}
+      : { from: { address: from, transport: actualTransport } }),
     ...(typeof payload.postback_data === "string"
-      ? { interactivePayload: payload.postback_data }
+      ? { interaction: { payload: payload.postback_data } }
       : {}),
     kind: "inbound",
-    media,
     messageId,
     occurredAt,
-    ...(to === undefined ? {} : { to }),
+    provider: "telnyx",
+    providerAccountId: organizationId,
+    providerData: payload,
+    ...(to === undefined
+      ? {}
+      : { to: { address: to, transport: actualTransport } }),
   };
 };
 
@@ -314,7 +328,7 @@ export const createTelnyxWebhookProcessor = (
         "messaging profile is not bound to this endpoint",
       );
     }
-    const event = normalize(envelope);
+    const event = normalize(envelope, organizationId);
     await options.inbox.purgeCompleted(
       now - (options.retentionMs ?? 24 * 60 * 60_000),
     );
@@ -333,7 +347,7 @@ export const createTelnyxWebhookProcessor = (
         event.action !== "help" &&
         options.consentLedger !== undefined
       ) {
-        if (!E164.test(event.from))
+        if (event.from === undefined || !E164.test(event.from.address))
           throw new TelnyxWebhookError(400, "consent sender must be E.164");
         const scopes = await options.resolveConsentScopes?.(event);
         if (scopes === undefined || scopes.length === 0)
@@ -344,13 +358,13 @@ export const createTelnyxWebhookProcessor = (
         for (const scope of scopes) {
           const evidence = {
             at: event.occurredAt,
-            idempotencyKey: `telnyx:${event.eventId}:${scope.programId}:${event.transport}`,
+            idempotencyKey: `telnyx:${event.eventId}:${scope.programId}:${event.from.transport}`,
             source: "telnyx-opt-out",
           };
           const fullScope = {
             ...scope,
-            recipient: event.from,
-            transport: event.transport,
+            recipient: event.from.address,
+            transport: event.from.transport,
           };
           if (event.action === "grant")
             await options.consentLedger.grant(fullScope, evidence);

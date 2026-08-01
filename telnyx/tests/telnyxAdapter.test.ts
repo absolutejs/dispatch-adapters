@@ -116,9 +116,12 @@ describe("createTelnyxAdapter", () => {
       },
     ]);
     expect(result).toMatchObject({
+      delivery: {
+        actualTransport: "sms",
+        requestedTransport: "sms",
+      },
       id: "message-1",
       provider: "telnyx",
-      requestedTransport: "sms",
     });
   });
 

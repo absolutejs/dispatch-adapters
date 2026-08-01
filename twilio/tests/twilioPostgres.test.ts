@@ -57,13 +57,16 @@ run("real PostgreSQL concurrency", () => {
   test("deduplicates lifecycle work across checked-out transactions", async () => {
     const store = createPostgresTwilioLifecycleStore(postgres);
     const event = {
-      accountSid: `AC${"1".repeat(32)}`,
       actualTransport: "sms" as const,
-      eventId: `status:SM${"2".repeat(32)}:delivered:`,
-      kind: "status" as const,
-      messageSid: `SM${"2".repeat(32)}`,
-      raw: {},
-      receivedAt: Date.now(),
+      errors: [],
+      eventId: `delivery:SM${"2".repeat(32)}:delivered:`,
+      kind: "delivery" as const,
+      messageId: `SM${"2".repeat(32)}`,
+      occurredAt: Date.now(),
+      provider: "twilio" as const,
+      providerAccountId: `AC${"1".repeat(32)}`,
+      providerData: {},
+      providerStatus: "delivered" as const,
       status: "delivered" as const,
     };
     const claims = await Promise.all(

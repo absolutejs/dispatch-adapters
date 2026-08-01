@@ -106,15 +106,15 @@ const handler = createTelnyxWebhookHandler({
   handler: processNormalizedEvent,
   inbox: createPostgresWebhookInboxStore(runner),
   resolveAccount: (organizationId) => accountConfiguration(organizationId),
-  resolveConsentScopes: (event) => programsForNumber(event.from),
+  resolveConsentScopes: (event) => programsForNumber(event.from!.address),
 });
 ```
 
 `resolveAccount()` returns one or two active Ed25519 public keys for safe key
 rotation and an optional Messaging Profile allowlist. Verification covers the
 raw body and timestamp before parsing or processing. Events are normalized with
-provider event id, occurrence time, requested/actual transport, interactive
-payload, media, and delivery errors. Completed inbox rows default to a 24-hour
+provider event id, occurrence time, typed endpoints and content, normalized
+interaction, provider status, transport, and delivery errors. Completed inbox rows default to a 24-hour
 purge window when the processor runs; applications should also run a scheduled
 purge and their legal-hold policy.
 

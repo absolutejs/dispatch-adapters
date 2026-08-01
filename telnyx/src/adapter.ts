@@ -1,8 +1,8 @@
 import type {
-  DispatchResult,
   MessagingAction,
   MessagingAdapter,
   MessagingContent,
+  MessagingDispatchResult,
   MessagingMessage,
   MessagingTransport,
 } from "@absolutejs/dispatch";
@@ -93,10 +93,11 @@ export type CreateTelnyxAdapterOptions = {
   accountId: string;
   allowNativeScheduling?: boolean;
   autoDetectLongMessages?: boolean;
+  capabilities?: MessagingAdapter["capabilities"];
   client: TelnyxClientLike;
   encoding?: "auto" | "gsm7" | "ucs2";
   idempotencyLeaseMs?: number;
-  idempotencyStore?: IdempotentOperationStore<DispatchResult>;
+  idempotencyStore?: IdempotentOperationStore<MessagingDispatchResult>;
   messagingProfileId: string;
   now?: () => number;
   rcsAgentId?: string;
@@ -408,6 +409,9 @@ export const createTelnyxAdapter = (
 ): MessagingAdapter => {
   assertConfiguration(options);
   return {
+    ...(options.capabilities === undefined
+      ? {}
+      : { capabilities: options.capabilities }),
     name: "telnyx",
     send: async (message) => {
       const now = options.now?.() ?? Date.now();
@@ -551,12 +555,25 @@ export const createTelnyxAdapter = (
         }
         throw error;
       }
-      const result: DispatchResult = {
+      const result: MessagingDispatchResult = {
         at: now,
-        fallbackAttempted: false,
+        delivery: {
+          actualTransport: message.to.transport,
+          attempts: [
+            {
+              actualTransport: message.to.transport,
+              ...(response.data?.id === undefined
+                ? {}
+                : { providerMessageId: response.data.id }),
+              route: "primary",
+              status: "accepted",
+              transport: message.to.transport,
+            },
+          ],
+          requestedTransport: message.to.transport,
+        },
         ...(response.data?.id === undefined ? {} : { id: response.data.id }),
         provider: "telnyx",
-        requestedTransport: message.to.transport,
       };
       if (claim?.disposition === "claimed")
         await store!.complete(claim.operationId, claim.token, result, now);

@@ -41,9 +41,9 @@ test("cancels and reconciles explicitly scheduled messages", async () => {
     }),
   });
   expect(await manager.inspect(messageSid)).toMatchObject({
-    messageSid,
+    messageId: messageSid,
+    providerStatus: "scheduled",
     state: "pending",
-    status: "scheduled",
   });
   expect(await manager.cancel(messageSid)).toMatchObject({
     state: "canceled",

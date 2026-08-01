@@ -83,18 +83,62 @@ const required = (params: Record<string, string>, key: string) => {
   return value;
 };
 
+const transportOf = (
+  params: Readonly<Record<string, string>>,
+  messageId: string,
+) => {
+  const prefix = params.ChannelPrefix?.toLowerCase();
+  if (
+    prefix === "rcs" ||
+    prefix === "whatsapp" ||
+    prefix === "mms" ||
+    prefix === "sms"
+  ) {
+    return prefix;
+  }
+  if (params.From?.startsWith("rcs:") || params.To?.startsWith("rcs:")) {
+    return "rcs" as const;
+  }
+  if (
+    params.From?.startsWith("whatsapp:") ||
+    params.To?.startsWith("whatsapp:")
+  ) {
+    return "whatsapp" as const;
+  }
+  return messageId.startsWith("MM") ? ("mms" as const) : ("sms" as const);
+};
+
+const addressOf = (value: string) => value.replace(/^(?:rcs|whatsapp):/u, "");
+
 const common = (params: Record<string, string>) => {
   const accountSid = required(params, "AccountSid");
-  const messageSid = required(params, "MessageSid");
-  if (!ACCOUNT_SID.test(accountSid) || !MESSAGE_SID.test(messageSid)) {
+  const messageId = required(params, "MessageSid");
+  if (!ACCOUNT_SID.test(accountSid) || !MESSAGE_SID.test(messageId)) {
     throw new TwilioWebhookError("invalid Twilio webhook SID", 400);
   }
+  const actualTransport = transportOf(params, messageId);
   return {
-    accountSid,
-    ...(params.From === undefined ? {} : { from: params.From }),
-    messageSid,
-    receivedAt: Date.now(),
-    ...(params.To === undefined ? {} : { to: params.To }),
+    actualTransport,
+    ...(params.From === undefined
+      ? {}
+      : {
+          from: {
+            address: addressOf(params.From),
+            transport: actualTransport,
+          },
+        }),
+    messageId,
+    occurredAt: Date.now(),
+    provider: "twilio" as const,
+    providerAccountId: accountSid,
+    ...(params.To === undefined
+      ? {}
+      : {
+          to: {
+            address: addressOf(params.To),
+            transport: actualTransport,
+          },
+        }),
   };
 };
 
@@ -110,15 +154,17 @@ export const parseTwilioWebhookEvent = (
     }
     return {
       ...shared,
-      ...(raw.Body === undefined ? {} : { body: raw.Body }),
-      ...(raw.ButtonPayload === undefined
-        ? {}
-        : { buttonPayload: raw.ButtonPayload }),
-      ...(raw.ButtonText === undefined ? {} : { buttonText: raw.ButtonText }),
-      eventId: `consent:${shared.messageSid}:${optOutType}`,
+      action:
+        optOutType === "START"
+          ? "grant"
+          : optOutType === "HELP"
+            ? "help"
+            : "revoke",
+      eventId: `consent:${shared.messageId}:${optOutType}`,
       kind: "consent",
+      keyword: raw.Body?.trim().toUpperCase() ?? optOutType,
       optOutType: optOutType as TwilioOptOutType,
-      raw,
+      providerData: raw,
     } satisfies TwilioConsentEvent;
   }
 
@@ -136,20 +182,33 @@ export const parseTwilioWebhookEvent = (
     }));
     return {
       ...shared,
-      ...(raw.Body === undefined ? {} : { body: raw.Body }),
+      content:
+        media.length === 0
+          ? { kind: "text", text: raw.Body ?? "" }
+          : {
+              kind: "media",
+              mediaUrls: media.map(({ url }) => url),
+              ...(raw.Body === undefined ? {} : { text: raw.Body }),
+            },
+      eventId: `inbound:${shared.messageId}`,
       ...(raw.ButtonPayload === undefined
         ? {}
-        : { buttonPayload: raw.ButtonPayload }),
-      ...(raw.ButtonText === undefined ? {} : { buttonText: raw.ButtonText }),
-      eventId: `inbound:${shared.messageSid}`,
+        : {
+            interaction: {
+              ...(raw.ButtonText === undefined
+                ? {}
+                : { label: raw.ButtonText }),
+              payload: raw.ButtonPayload,
+            },
+          }),
       kind: "inbound",
-      media,
-      raw,
+      providerData: raw,
     } satisfies TwilioInboundEvent;
   }
   if (status === undefined || !STATUS_SET.has(status)) {
     throw new TwilioWebhookError("unsupported Twilio messaging webhook", 400);
   }
+  const providerStatus = status as TwilioMessageStatus;
   const errorCodeValue = raw.ErrorCode;
   const errorCode =
     errorCodeValue === undefined || errorCodeValue.length === 0
@@ -158,28 +217,18 @@ export const parseTwilioWebhookEvent = (
   if (errorCode !== undefined && !Number.isInteger(errorCode)) {
     throw new TwilioWebhookError("invalid Twilio ErrorCode", 400);
   }
-  const prefix = raw.ChannelPrefix?.toLowerCase();
-  const actualTransport =
-    prefix === "rcs" ||
-    prefix === "whatsapp" ||
-    prefix === "mms" ||
-    prefix === "sms"
-      ? prefix
-      : raw.From?.startsWith("rcs:")
-        ? "rcs"
-        : raw.From?.startsWith("whatsapp:")
-          ? "whatsapp"
-          : shared.messageSid.startsWith("MM")
-            ? "mms"
-            : "sms";
   return {
     ...shared,
-    actualTransport,
     ...(errorCode === undefined ? {} : { errorCode }),
-    eventId: `status:${shared.messageSid}:${status}:${errorCode ?? ""}`,
-    kind: "status",
-    raw,
-    status: status as TwilioMessageStatus,
+    errors:
+      errorCode === undefined
+        ? []
+        : [{ code: String(errorCode), title: "Twilio delivery error" }],
+    eventId: `delivery:${shared.messageId}:${status}:${errorCode ?? ""}`,
+    kind: "delivery",
+    providerData: raw,
+    providerStatus,
+    status: providerStatus === "undelivered" ? "undeliverable" : providerStatus,
   } satisfies TwilioStatusEvent;
 };
 
@@ -213,10 +262,10 @@ export const deliverTwilioWebhookEvent = async (
     const scopes = await options.consent?.resolveScopes(event);
     for (const scope of scopes ?? []) {
       const evidence = {
-        at: event.receivedAt,
+        at: event.occurredAt,
         idempotencyKey: `twilio:${event.eventId}:${fingerprintTwilioPayload(scope)}`,
         metadata: { optOutType: event.optOutType },
-        reference: event.messageSid,
+        reference: event.messageId,
         source: "twilio-advanced-opt-out",
       };
       if (event.optOutType === "START") {

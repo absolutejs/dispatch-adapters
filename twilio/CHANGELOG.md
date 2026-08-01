@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-08-01
+
+- Adopt Dispatch 0.6 normalized delivery, inbound, consent, scheduling,
+  readiness, and registration contracts.
+- Normalize webhook endpoints, content, interactions, provider status, errors,
+  and account binding while retaining signed provider data explicitly.
+- Return structured delivery-attempt results and expose optional operational
+  capabilities through the adapter.
+
 ## [0.5.0] — 2026-08-01
 
 - Adopt Dispatch's provider-neutral messaging contract with typed endpoints,

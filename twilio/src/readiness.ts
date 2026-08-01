@@ -1,3 +1,4 @@
+import type { MessagingCapabilityReport } from "@absolutejs/dispatch";
 import type { TwilioLifecycleStore } from "./lifecycle";
 
 export type TwilioOperationalAssertions = {
@@ -14,13 +15,13 @@ export type TwilioOperationalAssertions = {
 };
 
 export type TwilioReadinessCheck = {
+  detail: string;
   id: string;
-  message: string;
   source: "assertion" | "twilio-api" | "store";
   status: "fail" | "pass";
 };
 
-export type TwilioReadinessReport = {
+export type TwilioReadinessReport = MessagingCapabilityReport & {
   checks: TwilioReadinessCheck[];
   ready: boolean;
   /** This is an operational check, never a legal certification. */
@@ -41,13 +42,13 @@ export const checkTwilioMessagingReadiness = (input: {
   const checks: TwilioReadinessCheck[] = [
     {
       id: "durable-lifecycle-store",
-      message: "Lifecycle events use durable, atomic persistence",
+      detail: "Lifecycle events use durable, atomic persistence",
       source: "store",
       status: input.store.durability === "durable" ? "pass" : "fail",
     },
-    ...asserted.map(([id, message]) => ({
+    ...asserted.map(([id, detail]) => ({
+      detail,
       id,
-      message,
       source: "assertion" as const,
       status: input.assertions[id] ? ("pass" as const) : ("fail" as const),
     })),
@@ -114,19 +115,19 @@ export const inspectTwilioMessagingReadiness = async (input: {
   const apiChecks: TwilioReadinessCheck[] = [
     {
       id: "account-binding",
-      message: "Messaging Service belongs to the expected Twilio account",
+      detail: "Messaging Service belongs to the expected Twilio account",
       source: "twilio-api",
       status: service.accountSid === input.expectedAccountSid ? "pass" : "fail",
     },
     {
       id: "service-binding",
-      message: "Inspected the configured Messaging Service",
+      detail: "Inspected the configured Messaging Service",
       source: "twilio-api",
       status: service.sid === input.messagingServiceSid ? "pass" : "fail",
     },
     {
       id: "inbound-webhook",
-      message: "Messaging Service uses the signed inbound POST webhook",
+      detail: "Messaging Service uses the signed inbound POST webhook",
       source: "twilio-api",
       status:
         service.inboundMethod === "POST" &&
@@ -136,14 +137,14 @@ export const inspectTwilioMessagingReadiness = async (input: {
     },
     {
       id: "status-callback",
-      message: "Messaging Service delivery callback matches the application",
+      detail: "Messaging Service delivery callback matches the application",
       source: "twilio-api",
       status:
         service.statusCallback === input.statusCallbackUrl ? "pass" : "fail",
     },
     {
       id: "sender-pool",
-      message: "Messaging Service has at least one sender",
+      detail: "Messaging Service has at least one sender",
       source: "twilio-api",
       status:
         phoneNumbers.length + shortCodes.length + channelSenders.length > 0
@@ -152,7 +153,7 @@ export const inspectTwilioMessagingReadiness = async (input: {
     },
     {
       id: "us-a2p-registration",
-      message: "Required US A2P registration is attached to the service",
+      detail: "Required US A2P registration is attached to the service",
       source: "twilio-api",
       status:
         input.requiresUsA2PRegistration !== true ||
@@ -164,7 +165,7 @@ export const inspectTwilioMessagingReadiness = async (input: {
       ? [
           {
             id: "rcs-sender",
-            message: "Messaging Service has an RCS sender",
+            detail: "Messaging Service has an RCS sender",
             source: "twilio-api" as const,
             status: channelSenders.some(
               ({ sender, senderType }) =>
@@ -176,7 +177,7 @@ export const inspectTwilioMessagingReadiness = async (input: {
           },
           {
             id: "rcs-sender-approved",
-            message: "RCS sender approval was verified in Twilio",
+            detail: "RCS sender approval was verified in Twilio",
             source: "assertion" as const,
             status:
               input.rcsAssertions?.senderApproved === true
@@ -185,7 +186,7 @@ export const inspectTwilioMessagingReadiness = async (input: {
           },
           {
             id: "rcs-opt-out-mitigation",
-            message:
+            detail:
               "RCS Advanced Opt-Out behavior and fallback mitigation were tested",
             source: "assertion" as const,
             status:
@@ -205,10 +206,10 @@ export const inspectTwilioMessagingReadiness = async (input: {
     },
     store: input.store,
   });
-  const checks = [
-    ...asserted.checks.filter(
+  const checks: TwilioReadinessCheck[] = [
+    ...(asserted.checks.filter(
       (check) => check.id !== "carrierRegistrationApproved",
-    ),
+    ) as TwilioReadinessCheck[]),
     ...apiChecks,
   ];
 

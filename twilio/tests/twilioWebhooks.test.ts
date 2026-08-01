@@ -77,8 +77,9 @@ describe("Twilio webhook processing", () => {
     expect(result.disposition).toBe("accepted");
     expect(result.event).toMatchObject({
       errorCode: 30003,
-      kind: "status",
-      status: "undelivered",
+      kind: "delivery",
+      providerStatus: "undelivered",
+      status: "undeliverable",
     });
     expect(events).toHaveLength(1);
   });
@@ -120,7 +121,7 @@ describe("Twilio webhook processing", () => {
     );
     expect(result.event).toMatchObject({
       actualTransport: "sms",
-      kind: "status",
+      kind: "delivery",
     });
   });
 
@@ -244,13 +245,13 @@ describe("Twilio webhook processing", () => {
       }),
     );
     expect(events[0]).toMatchObject({
-      body: "A photo",
-      buttonPayload: "ack-incident-42",
-      buttonText: "Acknowledge",
+      content: {
+        kind: "media",
+        mediaUrls: ["https://api.twilio.com/media/one"],
+        text: "A photo",
+      },
+      interaction: { label: "Acknowledge", payload: "ack-incident-42" },
       kind: "inbound",
-      media: [
-        { contentType: "image/jpeg", url: "https://api.twilio.com/media/one" },
-      ],
     });
   });
 
@@ -343,12 +344,12 @@ describe("Twilio webhook processing", () => {
     const process = createTwilioWebhookProcessor({
       resolveAccount: resolveAccount(),
       onEvent: (event) => {
-        if (event.kind !== "status") return;
-        if (event.status === "sent" && failSent) {
+        if (event.kind !== "delivery") return;
+        if (event.providerStatus === "sent" && failSent) {
           failSent = false;
           throw new Error("transient failure");
         }
-        delivered.push(event.status);
+        delivered.push(event.providerStatus);
       },
       store: createMemoryTwilioLifecycleStore(),
       publicUrl: URL,

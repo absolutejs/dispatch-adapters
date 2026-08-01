@@ -1,12 +1,13 @@
+import type { MessagingCapabilityReport } from "@absolutejs/dispatch";
+
 export type TelnyxReadinessCheck = {
   detail: string;
   id: string;
-  ok: boolean;
+  status: "fail" | "pass";
 };
 
-export type TelnyxMessagingReadinessReport = {
+export type TelnyxMessagingReadinessReport = MessagingCapabilityReport & {
   checks: TelnyxReadinessCheck[];
-  ready: boolean;
 };
 
 export type TelnyxReadinessClientLike = {
@@ -55,34 +56,36 @@ export const inspectTelnyxMessagingReadiness = async (input: {
     {
       detail: "Messaging Profile exists and is enabled",
       id: "profile-enabled",
-      ok:
+      status:
         profile.data?.id === input.messagingProfileId &&
-        profile.data.enabled === true,
+        profile.data.enabled === true
+          ? "pass"
+          : "fail",
     },
     {
       detail: "Messaging Profile webhook matches the configured endpoint",
       id: "webhook-bound",
-      ok: profile.data?.webhook_url === input.webhookUrl,
+      status: profile.data?.webhook_url === input.webhookUrl ? "pass" : "fail",
     },
     {
       detail: "A durable atomic webhook inbox is installed",
       id: "durable-inbox",
-      ok: input.assertions.durableInboxInstalled,
+      status: input.assertions.durableInboxInstalled ? "pass" : "fail",
     },
     {
       detail: "Program-level consent policy is installed",
       id: "consent-policy",
-      ok: input.assertions.consentPolicyInstalled,
+      status: input.assertions.consentPolicyInstalled ? "pass" : "fail",
     },
     {
       detail: "STOP/START workflow was tested end to end",
       id: "opt-out-tested",
-      ok: input.assertions.optOutWorkflowTested,
+      status: input.assertions.optOutWorkflowTested ? "pass" : "fail",
     },
     {
       detail: "Required 10DLC or toll-free registration is approved",
       id: "carrier-registration",
-      ok: input.assertions.carrierRegistrationApproved,
+      status: input.assertions.carrierRegistrationApproved ? "pass" : "fail",
     },
   ];
   if (input.rcsAgentId !== undefined) {
@@ -93,17 +96,20 @@ export const inspectTelnyxMessagingReadiness = async (input: {
       {
         detail: "RCS agent is attached to the configured Messaging Profile",
         id: "rcs-attached",
-        ok: agent.data?.messaging_profile_id === input.messagingProfileId,
+        status:
+          agent.data?.messaging_profile_id === input.messagingProfileId
+            ? "pass"
+            : "fail",
       },
       {
         detail:
           "Operator asserts that the RCS agent completed Google/carrier approval",
         id: "rcs-approved",
-        ok: input.assertions.rcsAgentApproved === true,
+        status: input.assertions.rcsAgentApproved === true ? "pass" : "fail",
       },
     );
   }
-  return { checks, ready: checks.every(({ ok }) => ok) };
+  return { checks, ready: checks.every(({ status }) => status === "pass") };
 };
 
 export const checkTelnyxMessagingReadiness = async (
@@ -113,7 +119,7 @@ export const checkTelnyxMessagingReadiness = async (
   if (!report.ready) {
     throw new Error(
       `Telnyx messaging is not ready: ${report.checks
-        .filter(({ ok }) => !ok)
+        .filter(({ status }) => status !== "pass")
         .map(({ id }) => id)
         .join(", ")}`,
     );

@@ -1,4 +1,8 @@
-import type { MessagingAdapter, MessagingMessage } from "@absolutejs/dispatch";
+import type {
+  MessagingAdapter,
+  MessagingDispatchResult,
+  MessagingMessage,
+} from "@absolutejs/dispatch";
 import {
   fingerprintTwilioPayload,
   TwilioIdempotencyIndeterminateError,
@@ -40,6 +44,8 @@ export type CreateTwilioAdapterOptions = {
   allowNativeScheduling?: boolean;
   /** Twilio account owning the default client and Messaging Service. */
   accountSid: string;
+  /** Optional normalized operational capabilities exposed through the adapter. */
+  capabilities?: MessagingAdapter["capabilities"];
   client: TwilioClientLike;
   idempotencyStore?: TwilioIdempotencyStore;
   /** Twilio Messaging Service used for every message. */
@@ -249,6 +255,9 @@ export const createTwilioAdapter = (
   assertConfiguration(options);
 
   return {
+    ...(options.capabilities === undefined
+      ? {}
+      : { capabilities: options.capabilities }),
     name: "twilio",
     send: async (message) => {
       assertMessage(message, options);
@@ -408,12 +417,25 @@ export const createTwilioAdapter = (
         }
         throw new TwilioSendError(response.errorCode, response.errorMessage);
       }
-      const result = {
+      const result: MessagingDispatchResult = {
         at: Date.now(),
-        fallbackAttempted: false,
+        delivery: {
+          actualTransport: message.to.transport,
+          attempts: [
+            {
+              actualTransport: message.to.transport,
+              ...(response.sid === undefined
+                ? {}
+                : { providerMessageId: response.sid }),
+              route: "primary",
+              status: "accepted",
+              transport: message.to.transport,
+            },
+          ],
+          requestedTransport: message.to.transport,
+        },
         ...(response.sid === undefined ? {} : { id: response.sid }),
         provider: "twilio",
-        requestedTransport: message.to.transport,
       };
       if (scope !== undefined && claimToken !== undefined) {
         await options.idempotencyStore!.complete(scope, claimToken, {

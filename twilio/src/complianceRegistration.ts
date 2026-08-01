@@ -1,3 +1,8 @@
+import type {
+  MessagingCapabilityReport,
+  MessagingRegistrationCapability,
+} from "@absolutejs/dispatch";
+
 export type TwilioA2PBrandRegistrationInput = {
   a2PProfileBundleSid: string;
   brandType?: "SOLE_PROPRIETOR" | "STANDARD";
@@ -169,6 +174,7 @@ export type TwilioComplianceInspectionTarget =
     };
 
 export type TwilioComplianceStatusCheck = {
+  detail: string;
   diagnostics?: {
     editAllowed?: boolean;
     editExpiration?: string;
@@ -182,7 +188,7 @@ export type TwilioComplianceStatusCheck = {
   status: "fail" | "pass" | "pending";
 };
 
-export type TwilioComplianceStatusReport = {
+export type TwilioComplianceStatusReport = MessagingCapabilityReport & {
   checks: TwilioComplianceStatusCheck[];
   ready: boolean;
   scope: "operational-not-legal-certification";
@@ -349,6 +355,7 @@ const classify = (
         }
       : {}),
     id,
+    detail: `${id} status is ${providerStatus}`,
     providerStatus,
     status: approved ? "pass" : failed ? "fail" : "pending",
   };
@@ -356,87 +363,89 @@ const classify = (
 
 export const createTwilioComplianceManager = (
   client: TwilioComplianceClientLike,
-) => ({
-  initializeTollFreeEmbeddableInquiry: async (
-    input: TwilioTollFreeEmbeddableInquiryInput,
-  ) => {
-    validateTollFreeInquiry(input);
-    const session =
-      await client.trusthub.v1.complianceTollfreeInquiries.create(input);
-    if (
-      session.inquiryId.length === 0 ||
-      session.inquirySessionToken.length === 0 ||
-      session.registrationId.length === 0
-    ) {
-      throw new TypeError(
-        "Twilio returned an invalid Compliance Embeddable session",
-      );
-    }
-    return session;
-  },
-  inspect: async (
-    target: TwilioComplianceInspectionTarget,
-  ): Promise<TwilioComplianceStatusReport> => {
-    const pending: Array<Promise<TwilioComplianceStatusCheck>> = [];
-    assertSid(target.customerProfileSid, "customerProfileSid", "BU");
-    pending.push(
-      client.trusthub.v1
-        .customerProfiles(target.customerProfileSid)
-        .fetch()
-        .then((item) => classify("customer-profile", item)),
-    );
-    if (target.kind === "a2p") {
-      assertSid(target.brandRegistrationSid, "brandRegistrationSid", "BN");
-      assertSid(target.campaignSid, "campaignSid");
-      assertSid(target.messagingServiceSid, "messagingServiceSid", "MG");
+) =>
+  ({
+    initializeTollFreeEmbeddableInquiry: async (
+      input: TwilioTollFreeEmbeddableInquiryInput,
+    ) => {
+      validateTollFreeInquiry(input);
+      const session =
+        await client.trusthub.v1.complianceTollfreeInquiries.create(input);
+      if (
+        session.inquiryId.length === 0 ||
+        session.inquirySessionToken.length === 0 ||
+        session.registrationId.length === 0
+      ) {
+        throw new TypeError(
+          "Twilio returned an invalid Compliance Embeddable session",
+        );
+      }
+      return session;
+    },
+    inspect: async (
+      target: TwilioComplianceInspectionTarget,
+    ): Promise<TwilioComplianceStatusReport> => {
+      const pending: Array<Promise<TwilioComplianceStatusCheck>> = [];
+      assertSid(target.customerProfileSid, "customerProfileSid", "BU");
       pending.push(
-        client.messaging.v1
-          .brandRegistrations(target.brandRegistrationSid)
+        client.trusthub.v1
+          .customerProfiles(target.customerProfileSid)
           .fetch()
-          .then((item) => classify("a2p-brand", item)),
+          .then((item) => classify("customer-profile", item)),
       );
-      pending.push(
-        client.messaging.v1
-          .services(target.messagingServiceSid)
-          .usAppToPerson(target.campaignSid)
-          .fetch()
-          .then((item) => classify("a2p-campaign", item)),
-      );
-    } else {
-      assertSid(target.tollfreeVerificationSid, "tollfreeVerificationSid");
-      pending.push(
-        client.messaging.v1
-          .tollfreeVerifications(target.tollfreeVerificationSid)
-          .fetch()
-          .then((item) => classify("toll-free", item)),
-      );
-    }
-    const checks = await Promise.all(pending);
-    return {
-      checks,
-      ready:
-        checks.length > 0 && checks.every(({ status }) => status === "pass"),
-      scope: "operational-not-legal-certification",
-    };
-  },
-  registerA2PBrand: async (input: TwilioA2PBrandRegistrationInput) => {
-    validateBrand(input);
-    return client.messaging.v1.brandRegistrations.create(input);
-  },
-  registerA2PCampaign: async (
-    messagingServiceSid: string,
-    input: TwilioA2PCampaignRegistrationInput,
-  ) => {
-    assertSid(messagingServiceSid, "messagingServiceSid", "MG");
-    validateCampaign(input);
-    return client.messaging.v1
-      .services(messagingServiceSid)
-      .usAppToPerson.create(input);
-  },
-  submitTollFreeVerification: async (
-    input: TwilioTollFreeVerificationInput,
-  ) => {
-    validateTollFree(input);
-    return client.messaging.v1.tollfreeVerifications.create(input);
-  },
-});
+      if (target.kind === "a2p") {
+        assertSid(target.brandRegistrationSid, "brandRegistrationSid", "BN");
+        assertSid(target.campaignSid, "campaignSid");
+        assertSid(target.messagingServiceSid, "messagingServiceSid", "MG");
+        pending.push(
+          client.messaging.v1
+            .brandRegistrations(target.brandRegistrationSid)
+            .fetch()
+            .then((item) => classify("a2p-brand", item)),
+        );
+        pending.push(
+          client.messaging.v1
+            .services(target.messagingServiceSid)
+            .usAppToPerson(target.campaignSid)
+            .fetch()
+            .then((item) => classify("a2p-campaign", item)),
+        );
+      } else {
+        assertSid(target.tollfreeVerificationSid, "tollfreeVerificationSid");
+        pending.push(
+          client.messaging.v1
+            .tollfreeVerifications(target.tollfreeVerificationSid)
+            .fetch()
+            .then((item) => classify("toll-free", item)),
+        );
+      }
+      const checks = await Promise.all(pending);
+      return {
+        checks,
+        ready:
+          checks.length > 0 && checks.every(({ status }) => status === "pass"),
+        scope: "operational-not-legal-certification",
+      };
+    },
+    registerA2PBrand: async (input: TwilioA2PBrandRegistrationInput) => {
+      validateBrand(input);
+      return client.messaging.v1.brandRegistrations.create(input);
+    },
+    registerA2PCampaign: async (
+      messagingServiceSid: string,
+      input: TwilioA2PCampaignRegistrationInput,
+    ) => {
+      assertSid(messagingServiceSid, "messagingServiceSid", "MG");
+      validateCampaign(input);
+      return client.messaging.v1
+        .services(messagingServiceSid)
+        .usAppToPerson.create(input);
+    },
+    submitTollFreeVerification: async (
+      input: TwilioTollFreeVerificationInput,
+    ) => {
+      validateTollFree(input);
+      return client.messaging.v1.tollfreeVerifications.create(input);
+    },
+  }) satisfies MessagingRegistrationCapability<TwilioComplianceInspectionTarget> &
+    Record<string, unknown>;

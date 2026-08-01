@@ -1,10 +1,10 @@
+import type {
+  MessagingScheduledMessageReport,
+  MessagingSchedulingCapability,
+} from "@absolutejs/dispatch";
 import type { TelnyxClientLike } from "./adapter";
 
-export type TelnyxScheduledMessageReport = {
-  messageId: string;
-  state: "canceled" | "failed" | "pending" | "sent";
-  status: string;
-};
+export type TelnyxScheduledMessageReport = MessagingScheduledMessageReport;
 
 const stateOf = (status: string): TelnyxScheduledMessageReport["state"] => {
   if (status === "cancelled") return "canceled";
@@ -25,14 +25,14 @@ const resourceOf = (value: unknown): Record<string, unknown> => {
 
 export const createTelnyxScheduledMessageManager = (
   client: Pick<TelnyxClientLike, "messages">,
-) => ({
+): MessagingSchedulingCapability => ({
   cancel: async (messageId: string): Promise<TelnyxScheduledMessageReport> => {
     const response = await client.messages.cancelScheduled(messageId);
     const resource = resourceOf(response);
     return {
       messageId: typeof resource.id === "string" ? resource.id : messageId,
+      providerStatus: "cancelled",
       state: "canceled",
-      status: "cancelled",
     };
   },
   inspect: async (messageId: string): Promise<TelnyxScheduledMessageReport> => {
@@ -42,8 +42,8 @@ export const createTelnyxScheduledMessageManager = (
       typeof resource.status === "string" ? resource.status : "unknown";
     return {
       messageId: typeof resource.id === "string" ? resource.id : messageId,
+      providerStatus: status,
       state: stateOf(status),
-      status,
     };
   },
 });
