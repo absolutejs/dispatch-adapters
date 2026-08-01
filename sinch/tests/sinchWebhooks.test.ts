@@ -6,7 +6,9 @@ import {
 } from "@absolutejs/compliance";
 import {
   createMemoryWebhookInboxStore,
-  createSinchWebhookProcessor,
+  createSinchWebhookHandler,
+  createSinchWebhookIntake,
+  drainSinchWebhookInbox,
   type SinchWebhookEvent,
 } from "../src";
 
@@ -41,7 +43,7 @@ const base = {
 
 const options = (
   events: SinchWebhookEvent[],
-  extra: Partial<Parameters<typeof createSinchWebhookProcessor>[0]> = {},
+  extra: Record<string, unknown> = {},
 ) => ({
   handler: (event: SinchWebhookEvent) => {
     events.push(event);
@@ -58,6 +60,25 @@ const options = (
       : undefined,
   ...extra,
 });
+
+const createSinchWebhookProcessor = (
+  configured: ReturnType<typeof options>,
+) => {
+  const intake = createSinchWebhookIntake(configured);
+  return {
+    process: async (input: Parameters<typeof intake.process>[0]) => {
+      const result = await intake.process(input);
+      await drainSinchWebhookInbox(configured);
+      return {
+        ...result,
+        disposition:
+          result.disposition === "accepted"
+            ? ("processed" as const)
+            : result.disposition,
+      };
+    },
+  };
+};
 
 describe("Sinch signed Conversation callbacks", () => {
   test("normalizes delivery and switching-channel failures", async () => {
@@ -112,7 +133,7 @@ describe("Sinch signed Conversation callbacks", () => {
     });
   });
 
-  test("persists SMS STOP and deduplicates nonce retries", async () => {
+  test("persists SMS STOP and deduplicates provider retries with new nonces", async () => {
     const events: SinchWebhookEvent[] = [];
     const ledger = createMessagingConsentLedger({
       store: createMemoryMessagingConsentStore(),
@@ -143,7 +164,8 @@ describe("Sinch signed Conversation callbacks", () => {
       "nonce-stop",
     );
     expect((await processor.process(request)).disposition).toBe("processed");
-    expect((await processor.process(request)).disposition).toBe("duplicate");
+    const retry = signed(JSON.parse(request.rawBody), SECRET, "nonce-retry");
+    expect((await processor.process(retry)).disposition).toBe("duplicate");
     expect(
       await ledger.decision({
         programId: "pro-alerts",
@@ -255,5 +277,108 @@ describe("Sinch signed Conversation callbacks", () => {
         headers: { ...request.headers, timestamp: "1" },
       }),
     ).rejects.toThrow("stale");
+  });
+
+  test("acknowledges durable intake before running application effects", async () => {
+    const events: SinchWebhookEvent[] = [];
+    const configured = options(events);
+    const intake = createSinchWebhookIntake(configured);
+    const result = await intake.process(
+      signed({
+        ...base,
+        message: {
+          channel_identity: { channel: "SMS", identity: "+12025550100" },
+          contact_message: { text_message: { text: "hello" } },
+          id: "inbound-async",
+        },
+      }),
+    );
+    expect(result.disposition).toBe("accepted");
+    expect(events).toHaveLength(0);
+    expect(await drainSinchWebhookInbox(configured)).toBe(1);
+    expect(events).toHaveLength(1);
+  });
+
+  test("returns 202 after authenticated durable HTTP intake", async () => {
+    const events: SinchWebhookEvent[] = [];
+    const configured = options(events);
+    const callback = signed({
+      ...base,
+      message: {
+        channel_identity: { channel: "SMS", identity: "+12025550100" },
+        contact_message: { text_message: { text: "hello" } },
+        id: "inbound-http",
+      },
+    });
+    const handler = createSinchWebhookHandler({
+      ...configured,
+      resolveAccountKey: () => callback.accountKey,
+    });
+    const response = await handler(
+      new Request("https://example.com/webhooks/sinch/account-a", {
+        body: callback.rawBody,
+        headers: {
+          "x-sinch-webhook-signature": callback.headers.signature,
+          "x-sinch-webhook-signature-algorithm": callback.headers.algorithm,
+          "x-sinch-webhook-signature-nonce": callback.headers.nonce,
+          "x-sinch-webhook-signature-timestamp": callback.headers.timestamp,
+        },
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(202);
+    expect(events).toHaveLength(0);
+    expect(await drainSinchWebhookInbox(configured)).toBe(1);
+  });
+
+  test("retries consent effects during durable recovery", async () => {
+    const events: SinchWebhookEvent[] = [];
+    const ledger = createMessagingConsentLedger({
+      store: createMemoryMessagingConsentStore(),
+    });
+    let attempts = 0;
+    const configured = options(events, {
+      consentLedger: {
+        decision: ledger.decision,
+        grant: ledger.grant,
+        revoke: async (...args: Parameters<typeof ledger.revoke>) => {
+          if (++attempts === 1) throw new Error("temporary ledger failure");
+          return ledger.revoke(...args);
+        },
+      },
+      resolveConsentScopes: () => [
+        {
+          programId: "pro-alerts",
+          purpose: "incident-alerts",
+          tenant: "tenant-a",
+        },
+      ],
+    });
+    const intake = createSinchWebhookIntake(configured as never);
+    await intake.process(
+      signed({
+        ...base,
+        message: {
+          channel_identity: { channel: "SMS", identity: "+12025550100" },
+          contact_message: { text_message: { text: "STOP" } },
+          id: "inbound-recovery-stop",
+          sender_id: "+12025550199",
+        },
+      }),
+    );
+    await expect(drainSinchWebhookInbox(configured as never)).rejects.toThrow(
+      "temporary ledger failure",
+    );
+    expect(await drainSinchWebhookInbox(configured as never)).toBe(1);
+    expect(
+      await ledger.decision({
+        programId: "pro-alerts",
+        purpose: "incident-alerts",
+        recipient: "+12025550100",
+        tenant: "tenant-a",
+        transport: "sms",
+      }),
+    ).toMatchObject({ allowed: false, code: "revoked" });
+    expect(events).toHaveLength(1);
   });
 });

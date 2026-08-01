@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type {
   MessagingConsentLedger,
   MessagingConsentScope,
@@ -54,9 +54,7 @@ export type SinchWebhookHeaders = {
   timestamp: string | undefined;
 };
 
-export type CreateSinchWebhookProcessorOptions = {
-  consentLedger?: MessagingConsentLedger;
-  handler: (event: SinchWebhookEvent) => Promise<void> | void;
+export type CreateSinchWebhookIntakeOptions = {
   inbox: WebhookInboxStore<SinchWebhookEvent>;
   now?: () => number;
   replayToleranceMs?: number;
@@ -66,6 +64,12 @@ export type CreateSinchWebhookProcessorOptions = {
     | Promise<SinchWebhookAccountConfiguration | undefined>
     | SinchWebhookAccountConfiguration
     | undefined;
+  retentionMs?: number;
+};
+
+export type SinchWebhookEffectsOptions = {
+  consentLedger?: MessagingConsentLedger;
+  handler: (event: SinchWebhookEvent) => Promise<void> | void;
   resolveConsentScopes?: (
     event: SinchConsentEvent,
   ) =>
@@ -73,7 +77,6 @@ export type CreateSinchWebhookProcessorOptions = {
         ReadonlyArray<Omit<MessagingConsentScope, "recipient" | "transport">>
       >
     | ReadonlyArray<Omit<MessagingConsentScope, "recipient" | "transport">>;
-  retentionMs?: number;
 };
 
 export class SinchWebhookError extends Error {
@@ -147,9 +150,23 @@ const occurredAtOf = (payload: Record<string, unknown>) => {
   return occurredAt;
 };
 
+const eventIdOf = (
+  kind: string,
+  payload: Record<string, unknown>,
+  ...identity: ReadonlyArray<unknown>
+) =>
+  `sinch:${kind}:${createHash("sha256")
+    .update(
+      JSON.stringify([
+        payload.project_id ?? "",
+        payload.app_id ?? "",
+        ...identity,
+      ]),
+    )
+    .digest("hex")}`;
+
 const normalize = (
   payload: Record<string, unknown>,
-  nonce: string,
   accountProjectId: string,
 ): SinchWebhookEvent => {
   const projectId = accountProjectId;
@@ -172,7 +189,14 @@ const normalize = (
       );
     }
     return {
-      eventId: nonce,
+      eventId: eventIdOf(
+        "capability",
+        payload,
+        requestId,
+        status,
+        transport,
+        occurredAt,
+      ),
       features: Array.isArray(capability.channel_capabilities)
         ? capability.channel_capabilities.map(String)
         : [],
@@ -219,7 +243,14 @@ const normalize = (
                   : { title: String(reason.sub_code) }),
               },
             ],
-      eventId: nonce,
+      eventId: eventIdOf(
+        "delivery",
+        payload,
+        messageId,
+        providerStatus,
+        transport,
+        occurredAt,
+      ),
       kind: "delivery",
       messageId,
       occurredAt,
@@ -248,11 +279,17 @@ const normalize = (
     return {
       action: notification === explicitOptIn ? "grant" : "revoke",
       actualTransport: transport,
-      eventId: nonce,
+      eventId: eventIdOf(
+        "consent",
+        payload,
+        notification.request_id,
+        notification === explicitOptIn ? "grant" : "revoke",
+        transport,
+      ),
       from,
       keyword: notification === explicitOptIn ? "OPT_IN" : "OPT_OUT",
       kind: "consent",
-      messageId: String(notification.request_id ?? nonce),
+      messageId: String(notification.request_id ?? ""),
       occurredAt,
       provider: "sinch",
       providerAccountId: projectId,
@@ -273,11 +310,17 @@ const normalize = (
     return {
       action: preference.preference === "resume" ? "grant" : "revoke",
       actualTransport: transport,
-      eventId: nonce,
+      eventId: eventIdOf(
+        "preference",
+        payload,
+        inboundEvent.id,
+        preference.preference,
+        transport,
+      ),
       from,
       keyword: String(preference.preference).toUpperCase(),
       kind: "consent",
-      messageId: String(inboundEvent.id ?? nonce),
+      messageId: String(inboundEvent.id ?? ""),
       occurredAt,
       provider: "sinch",
       providerAccountId: projectId,
@@ -292,11 +335,17 @@ const normalize = (
     return {
       actualTransport: transport,
       content: { kind: "text", text: "" },
-      eventId: nonce,
+      eventId: eventIdOf(
+        "event",
+        payload,
+        inboundEvent.id,
+        transport,
+        occurredAt,
+      ),
       ...(from === undefined ? {} : { from }),
       interaction: { payload: JSON.stringify(contactEvent) },
       kind: "inbound",
-      messageId: String(inboundEvent.id ?? nonce),
+      messageId: String(inboundEvent.id ?? ""),
       occurredAt,
       provider: "sinch",
       providerAccountId: projectId,
@@ -323,9 +372,9 @@ const normalize = (
   const to = endpoint(message.sender_id, transport);
   const base = {
     actualTransport: transport,
-    eventId: nonce,
+    eventId: eventIdOf("message", payload, message.id, transport, occurredAt),
     ...(from === undefined ? {} : { from }),
-    messageId: String(message.id ?? nonce),
+    messageId: String(message.id ?? ""),
     occurredAt,
     provider: "sinch" as const,
     providerAccountId: projectId,
@@ -426,11 +475,50 @@ const verify = (
   });
   if (!valid)
     throw new SinchWebhookError(401, "invalid Sinch webhook signature");
-  return headers.nonce;
 };
 
-export const createSinchWebhookProcessor = (
-  options: CreateSinchWebhookProcessorOptions,
+const applySinchWebhookEffects = async (
+  options: SinchWebhookEffectsOptions,
+  event: SinchWebhookEvent,
+) => {
+  if (
+    event.kind === "consent" &&
+    event.action !== "help" &&
+    options.consentLedger !== undefined
+  ) {
+    if (event.from === undefined) {
+      throw new SinchWebhookError(400, "consent sender is required");
+    }
+    const scopes = await options.resolveConsentScopes?.(event);
+    if (scopes === undefined || scopes.length === 0) {
+      throw new SinchWebhookError(
+        500,
+        "consent scope resolver returned no programs",
+      );
+    }
+    for (const scope of scopes) {
+      const fullScope = {
+        ...scope,
+        recipient: event.from.address,
+        transport: event.from.transport,
+      };
+      const evidence = {
+        at: event.occurredAt,
+        idempotencyKey: `sinch:${event.eventId}:${scope.programId}:${event.from.transport}`,
+        source: "sinch-opt-out",
+      };
+      if (event.action === "grant") {
+        await options.consentLedger.grant(fullScope, evidence);
+      } else {
+        await options.consentLedger.revoke(fullScope, evidence);
+      }
+    }
+  }
+  await options.handler(event);
+};
+
+export const createSinchWebhookIntake = (
+  options: CreateSinchWebhookIntakeOptions,
 ) => ({
   process: async (input: {
     accountKey: string;
@@ -442,7 +530,7 @@ export const createSinchWebhookProcessor = (
       throw new SinchWebhookError(401, "unknown Sinch webhook account");
     }
     const now = options.now?.() ?? Date.now();
-    const nonce = verify(
+    verify(
       input.rawBody,
       input.headers,
       account,
@@ -462,85 +550,50 @@ export const createSinchWebhookProcessor = (
     ) {
       throw new SinchWebhookError(403, "unexpected Sinch project or app");
     }
-    const event = normalize(payload, nonce, account.projectId);
+    const event = normalize(payload, account.projectId);
     await options.inbox.purgeCompleted(
       now - (options.retentionMs ?? 24 * 60 * 60_000),
     );
-    const claim = await options.inbox.accept({
-      eventId: event.eventId,
-      occurredAt: event.occurredAt,
-      payload: event,
-      provider: "sinch",
-      streamId: `${account.projectId}:${payload.app_id}`,
-    });
-    if (claim.token === undefined) {
-      return { disposition: "duplicate" as const, event };
+    const claim = await options.inbox.accept(
+      {
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        payload: event,
+        provider: "sinch",
+        streamId: `${account.projectId}:${payload.app_id}`,
+      },
+      { leaseMs: 1, now },
+    );
+    if (claim.token !== undefined) {
+      await options.inbox.release(event.eventId, claim.token);
     }
-    try {
-      if (
-        event.kind === "consent" &&
-        event.action !== "help" &&
-        options.consentLedger !== undefined
-      ) {
-        if (event.from === undefined) {
-          throw new SinchWebhookError(400, "consent sender is required");
-        }
-        const scopes = await options.resolveConsentScopes?.(event);
-        if (scopes === undefined || scopes.length === 0) {
-          throw new SinchWebhookError(
-            500,
-            "consent scope resolver returned no programs",
-          );
-        }
-        for (const scope of scopes) {
-          const fullScope = {
-            ...scope,
-            recipient: event.from.address,
-            transport: event.from.transport,
-          };
-          const evidence = {
-            at: event.occurredAt,
-            idempotencyKey: `sinch:${event.eventId}:${scope.programId}:${event.from.transport}`,
-            source: "sinch-opt-out",
-          };
-          if (event.action === "grant") {
-            await options.consentLedger.grant(fullScope, evidence);
-          } else {
-            await options.consentLedger.revoke(fullScope, evidence);
-          }
-        }
-      }
-      await options.handler(event);
-      await options.inbox.complete(event.eventId, claim.token, now);
-      return { disposition: "processed" as const, event };
-    } catch (error) {
-      await options.inbox
-        .release(event.eventId, claim.token)
-        .catch(() => undefined);
-      throw error;
-    }
+    return { disposition: claim.disposition, event };
   },
 });
 
 export const drainSinchWebhookInbox = async (
-  options: Pick<CreateSinchWebhookProcessorOptions, "handler" | "inbox">,
+  options: SinchWebhookEffectsOptions & {
+    inbox: WebhookInboxStore<SinchWebhookEvent>;
+    limit?: number;
+  },
 ) =>
   drainWebhookInbox({
-    handler: async ({ payload }) => options.handler(payload),
+    handler: async ({ payload }) => applySinchWebhookEffects(options, payload),
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
     store: options.inbox,
   });
 
 export const createSinchWebhookHandler = (
-  options: CreateSinchWebhookProcessorOptions & {
+  options: CreateSinchWebhookIntakeOptions & {
     resolveAccountKey: (
       request: Pick<Request, "headers" | "url">,
     ) => Promise<string> | string;
   },
 ) => {
-  const processor = createSinchWebhookProcessor(options);
+  const intake = createSinchWebhookIntake(options);
   return async (request: Request) => {
     try {
-      const result = await processor.process({
+      const result = await intake.process({
         accountKey: await options.resolveAccountKey({
           headers: request.headers,
           url: request.url,
@@ -561,7 +614,7 @@ export const createSinchWebhookHandler = (
       });
       return Response.json(
         { disposition: result.disposition, eventId: result.event.eventId },
-        { status: 200 },
+        { status: 202 },
       );
     } catch (error) {
       const status = error instanceof SinchWebhookError ? error.status : 500;

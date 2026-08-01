@@ -1,8 +1,11 @@
 import { defineImplementation, defineManifest } from "@absolutejs/manifest";
 import { Type } from "@sinclair/typebox";
-import type { CreateSinchAdapterOptions } from "./adapter";
 
-export const manifest = defineManifest<CreateSinchAdapterOptions>()({
+type SinchManifestSettings = {
+  conversationRegion: "br" | "eu" | "us";
+};
+
+export const manifest = defineManifest<SinchManifestSettings>()({
   contract: 2,
   identity: {
     accent: "#ff5a10",
@@ -14,7 +17,7 @@ export const manifest = defineManifest<CreateSinchAdapterOptions>()({
     tagline: "Run resilient omnichannel messaging with Sinch.",
   },
   implements: [
-    defineImplementation<CreateSinchAdapterOptions>()({
+    defineImplementation<SinchManifestSettings>()({
       contract: "dispatch/messaging-adapter",
       factory: "createSinchAdapter",
       from: "@absolutejs/dispatch-sinch",
@@ -42,15 +45,18 @@ export const manifest = defineManifest<CreateSinchAdapterOptions>()({
         ],
       },
       settings: Type.Object({
-        webhookUrl: Type.String({
-          description: "Public HTTPS URL handled by createSinchWebhookHandler.",
-          format: "uri",
-          title: "Webhook URL",
-        }),
+        conversationRegion: Type.Union(
+          [Type.Literal("us"), Type.Literal("eu"), Type.Literal("br")],
+          {
+            description:
+              "Conversation API region where the Sinch app was created.",
+            title: "Conversation region",
+          },
+        ),
       }),
       title: "Sinch",
       wiring: {
-        code: "createSinchAdapter({ appId: ${env.SINCH_APP_ID}, projectId: ${env.SINCH_PROJECT_ID}, client: new SinchClient({ projectId: ${env.SINCH_PROJECT_ID}, keyId: ${env.SINCH_KEY_ID}, keySecret: ${env.SINCH_KEY_SECRET}, conversationRegion: 'us' }), ...${settings} })",
+        code: "createSinchAdapter({ appId: ${env.SINCH_APP_ID}, projectId: ${env.SINCH_PROJECT_ID}, client: new SinchClient({ projectId: ${env.SINCH_PROJECT_ID}, keyId: ${env.SINCH_KEY_ID}, keySecret: ${env.SINCH_KEY_SECRET}, conversationRegion: ${settings.conversationRegion} }) })",
         imports: [
           { from: "@absolutejs/dispatch-sinch", names: ["createSinchAdapter"] },
           { from: "@sinch/sdk-core", names: ["SinchClient"] },

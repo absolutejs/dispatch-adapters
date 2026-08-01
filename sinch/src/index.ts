@@ -33,6 +33,13 @@ export {
   type SinchTollFreeVerificationInput,
 } from "./registration";
 export {
+  createSinchRegistrationClient,
+  SinchRegistrationApiError,
+  SinchRegistrationIndeterminateError,
+  type CreateSinchRegistrationClientOptions,
+  type SinchRegistrationFetch,
+} from "./registrationClient";
+export {
   createMemoryIdempotentOperationStore,
   createMemoryWebhookInboxStore,
   createPostgresIdempotentOperationStore,
@@ -43,10 +50,10 @@ export {
 } from "@absolutejs/reliability";
 export {
   createSinchWebhookHandler,
-  createSinchWebhookProcessor,
+  createSinchWebhookIntake,
   drainSinchWebhookInbox,
   SinchWebhookError,
-  type CreateSinchWebhookProcessorOptions,
+  type CreateSinchWebhookIntakeOptions,
   type SinchCapabilityEvent,
   type SinchConsentEvent,
   type SinchDeliveryEvent,
@@ -54,4 +61,5 @@ export {
   type SinchWebhookAccountConfiguration,
   type SinchWebhookEvent,
   type SinchWebhookHeaders,
+  type SinchWebhookEffectsOptions,
 } from "./webhooks";

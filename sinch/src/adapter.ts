@@ -62,7 +62,6 @@ export type SinchTenantConfiguration = {
   defaultFrom?: Partial<Record<SinchTransport, string>>;
   projectId: string;
   resolveRecipientIdentity?: SinchRecipientIdentityResolver;
-  webhookUrl?: string;
 };
 
 export type CreateSinchAdapterOptions = {
@@ -80,7 +79,6 @@ export type CreateSinchAdapterOptions = {
   ) => Promise<SinchTenantConfiguration> | SinchTenantConfiguration;
   /** Conversation API message lifetime in seconds. */
   ttl?: number;
-  webhookUrl: string;
 };
 
 export class SinchConfigurationError extends Error {
@@ -97,6 +95,7 @@ export class SinchIdempotencyIndeterminateError extends Error {
 }
 
 const E164 = /^\+[1-9]\d{1,14}$/;
+const WHATSAPP_BUSINESS_SCOPED_USER_ID = /^[A-Z]{2}\.[A-Za-z0-9]+$/;
 const transports = new Set<string>([
   "instagram",
   "kakao",
@@ -110,13 +109,7 @@ const transports = new Set<string>([
   "wechat",
   "whatsapp",
 ]);
-const phoneTransports = new Set<SinchTransport>([
-  "mms",
-  "rcs",
-  "sms",
-  "viber",
-  "whatsapp",
-]);
+const phoneTransports = new Set<SinchTransport>(["mms", "rcs", "sms", "viber"]);
 
 const assertHttps = (value: string, name: string) => {
   let url: URL;
@@ -151,6 +144,15 @@ const channelOf = (transport: SinchTransport) =>
 
 const identityOf = (endpoint: MessagingEndpoint) => {
   const transport = transportOf(endpoint.transport);
+  if (
+    transport === "whatsapp" &&
+    !E164.test(endpoint.address) &&
+    !WHATSAPP_BUSINESS_SCOPED_USER_ID.test(endpoint.address)
+  ) {
+    throw new SinchConfigurationError(
+      "whatsapp endpoints must use E.164 or a business-scoped user ID",
+    );
+  }
   if (phoneTransports.has(transport) && !E164.test(endpoint.address)) {
     throw new SinchConfigurationError(
       `${transport} endpoints must use E.164 addresses`,
@@ -285,8 +287,7 @@ const senderProperties = (
     if (sender === undefined) continue;
     if (route.transport === "sms") properties.SMS_SENDER = sender;
     else if (route.transport === "mms") properties.MMS_SENDER = sender;
-    else if (route.transport === "viber") properties.VIBER_SENDER_NAME = sender;
-    else if (route.from !== undefined) {
+    else if (route.from !== undefined || sender !== undefined) {
       throw new SinchConfigurationError(
         `${route.transport} sender identity is configured on the Sinch app, not per message`,
       );
@@ -302,7 +303,6 @@ const assertConfiguration = (options: CreateSinchAdapterOptions) => {
   if (options.appId.trim().length === 0) {
     throw new SinchConfigurationError("appId is required");
   }
-  assertHttps(options.webhookUrl, "webhookUrl");
   if (
     options.ttl !== undefined &&
     (!Number.isInteger(options.ttl) || options.ttl < 3)
@@ -339,7 +339,6 @@ export const createSinchAdapter = (
         projectId: tenant?.projectId ?? options.projectId,
         resolveRecipientIdentity:
           tenant?.resolveRecipientIdentity ?? options.resolveRecipientIdentity,
-        webhookUrl: tenant?.webhookUrl ?? options.webhookUrl,
       };
       if (
         config.projectId.trim().length === 0 ||
@@ -349,7 +348,6 @@ export const createSinchAdapter = (
           "resolved tenant projectId and appId are required",
         );
       }
-      assertHttps(config.webhookUrl, "resolved webhookUrl");
       const identityFor = async (transport: MessagingTransport) => {
         const sinchTransport = transportOf(transport);
         const address =
@@ -400,7 +398,6 @@ export const createSinchAdapter = (
       const channelProperties = senderProperties(routes, config.defaultFrom);
       const payload: SinchMessagePayload = {
         app_id: config.appId,
-        callback_url: config.webhookUrl,
         channel_priority_order: channelPriority,
         ...(Object.keys(channelProperties).length === 0
           ? {}

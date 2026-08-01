@@ -11,7 +11,6 @@ import {
 
 const APP_ID = "app-1";
 const PROJECT_ID = "project-1";
-const WEBHOOK = "https://example.com/webhooks/sinch/account-a";
 
 test("accepts the current official Sinch SDK client", () => {
   const official: SinchConversationClientLike = new SinchClient({
@@ -43,7 +42,6 @@ describe("createSinchAdapter", () => {
       } as never,
       defaultFrom: { sms: "+12025550199" },
       projectId: PROJECT_ID,
-      webhookUrl: WEBHOOK,
     });
     const result = await adapter.send({
       content: {
@@ -99,7 +97,6 @@ describe("createSinchAdapter", () => {
         appId: `${tenant}-app`,
         projectId: `${tenant}-project`,
       }),
-      webhookUrl: WEBHOOK,
     });
     const message = {
       content: { kind: "text" as const, text: "Alert" },
@@ -133,7 +130,6 @@ describe("createSinchAdapter", () => {
       projectId: PROJECT_ID,
       resolveRecipientIdentity: ({ address, transport }) =>
         transport === "messenger" ? "page-scoped-user-1" : address,
-      webhookUrl: WEBHOOK,
     });
     await adapter.send({
       content: { kind: "text", text: "Alert" },
@@ -165,7 +161,6 @@ describe("createSinchAdapter", () => {
         },
       } as never,
       projectId: PROJECT_ID,
-      webhookUrl: WEBHOOK,
     });
     await adapter.send({
       content: { kind: "text", text: "Private alert" },
@@ -182,7 +177,6 @@ describe("createSinchAdapter", () => {
         conversation: { messages: { send: async () => ({}) } },
       } as never,
       projectId: PROJECT_ID,
-      webhookUrl: WEBHOOK,
     });
     await expect(
       adapter.send({
@@ -211,7 +205,6 @@ describe("createSinchAdapter", () => {
         },
       } as never,
       projectId: PROJECT_ID,
-      webhookUrl: WEBHOOK,
     });
     await expect(
       createDispatcher({ messaging }).messaging({
@@ -219,5 +212,50 @@ describe("createSinchAdapter", () => {
         to: { address: "+12025550100", transport: "sms" },
       }),
     ).resolves.toMatchObject({ provider: "sinch" });
+  });
+
+  test("accepts WhatsApp business-scoped user IDs", async () => {
+    let payload: any;
+    const adapter = createSinchAdapter({
+      appId: APP_ID,
+      client: {
+        conversation: {
+          messages: {
+            send: async (input: any) => {
+              payload = input.sendMessageRequestBody;
+              return { message_id: "message-whatsapp-bsuid" };
+            },
+          },
+        },
+      } as never,
+      projectId: PROJECT_ID,
+    });
+    await adapter.send({
+      content: { kind: "text", text: "Alert" },
+      to: { address: "US.13491208655302741918", transport: "whatsapp" },
+    });
+    expect(payload.recipient.identified_by.channel_identities).toEqual([
+      {
+        channel: "WHATSAPP",
+        identity: "US.13491208655302741918",
+      },
+    ]);
+  });
+
+  test("rejects undocumented Viber Business sender overrides", async () => {
+    const adapter = createSinchAdapter({
+      appId: APP_ID,
+      client: {
+        conversation: { messages: { send: async () => ({}) } },
+      } as never,
+      defaultFrom: { viber: "Example" },
+      projectId: PROJECT_ID,
+    });
+    await expect(
+      adapter.send({
+        content: { kind: "text", text: "Alert" },
+        to: { address: "+12025550100", transport: "viber" },
+      }),
+    ).rejects.toThrow("configured on the Sinch app");
   });
 });

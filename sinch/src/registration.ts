@@ -9,33 +9,93 @@ export type SinchRegistrationResource = {
   status: string;
 };
 
-export type SinchBrandRegistrationInput = Record<string, unknown> & {
-  country: string;
-  email: string;
-  entityType: string;
-  legalName: string;
+export type SinchBrandRegistrationInput = {
+  brandRegistrationType: "FULL" | "SIMPLIFIED";
+  companyDetails: {
+    brandName: string;
+    businessContactEmail: string;
+    city: string;
+    companyEmail: string;
+    companyName: string;
+    country: string;
+    postalCode: string;
+    state: string;
+    streetAddress: string;
+    webAddress: string;
+  };
+  contactDetails: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    phoneNumber: string;
+  };
+  displayName: string;
+  financialDetails: {
+    brandEntityType: "CHARITY_NON_PROFIT" | "PRIVATE" | "PUBLIC";
+    brandVerticalType: string;
+    exchange?: string;
+    stockSymbol?: string;
+    taxIdCorporate: string;
+    taxIdCountry: string;
+  };
+  mock?: boolean;
 };
 
 export type SinchCampaignRegistrationInput = Record<string, unknown> & {
+  ageGated: boolean;
+  autoRenewal: boolean;
   brandId: string;
   campaignName: string;
   description: string;
-  messageFlow: Record<string, unknown>;
+  directLending: boolean;
+  embeddedLink: boolean;
+  embeddedPhone: boolean;
+  helpKeywords: string;
+  helpMessage: string;
+  messageFlow: string;
+  numberPool: boolean;
+  optInMessage: string;
+  optinKeywords: string;
+  optoutKeywords: string;
   sample1: string;
+  sample2: string;
+  sample3: string;
+  stopMessage: string;
+  subscriberHelp: boolean;
+  subscriberOptIn: boolean;
+  subscriberOptOut: boolean;
   useCase: string;
 };
 
 export type SinchNumberLinkInput = { campaignId: string; number: string };
 
 export type SinchTollFreeVerificationInput = Record<string, unknown> & {
+  businessAddress1: string;
+  businessCity: string;
   businessContactEmail: string;
+  businessContactFirstName: string;
+  businessContactLastName: string;
+  businessContactPhone: string;
   businessName: string;
+  businessRegistrationCountry: string;
+  businessRegistrationNumber: string;
+  businessRegistrationType: string;
+  businessState: string;
+  businessType:
+    | "GOVERNMENT"
+    | "NON_PROFIT"
+    | "PRIVATE_PROFIT"
+    | "PUBLIC_PROFIT"
+    | "SOLE_PROPRIETOR";
+  businessZipCode: string;
+  corporateWebsite: string;
   messageVolume: string;
-  optInDescription: string;
-  optInImageUrls: ReadonlyArray<string>;
-  sampleMessages: ReadonlyArray<string>;
+  optInWorkflowDescription: string;
+  optInWorkflowImageUrls: ReadonlyArray<string>;
+  phoneNumber: string;
+  productionMessageContent: string;
   useCase: string;
-  website: string;
+  useCaseSummary: string;
 };
 
 export type SinchRegistrationClientLike = {
@@ -132,10 +192,18 @@ export const createSinchRegistrationManager = (
   ({
     registerBrand: async (input: SinchBrandRegistrationInput) => {
       required(projectId, "projectId");
-      required(input.country, "country");
-      required(input.email, "email");
-      required(input.entityType, "entityType");
-      required(input.legalName, "legalName");
+      required(input.displayName, "displayName");
+      required(input.companyDetails.companyName, "companyDetails.companyName");
+      required(input.companyDetails.brandName, "companyDetails.brandName");
+      required(input.companyDetails.country, "companyDetails.country");
+      required(
+        input.financialDetails.taxIdCorporate,
+        "financialDetails.taxIdCorporate",
+      );
+      if (!/^\+[1-9]\d{6,14}$/.test(input.contactDetails.phoneNumber)) {
+        throw new Error("contactDetails.phoneNumber must be an E.164 address");
+      }
+      assertHttps(input.companyDetails.webAddress, "companyDetails.webAddress");
       return client.brands.submit(projectId, input);
     },
     qualifyCampaign: (brandId: string, useCase: string) => {
@@ -153,9 +221,23 @@ export const createSinchRegistrationManager = (
       if (input.sample1.trim().length < 20) {
         throw new Error("sample1 must contain at least 20 characters");
       }
-      if (Object.keys(input.messageFlow).length === 0) {
-        throw new Error("messageFlow is required");
+      if (
+        input.sample2.trim().length === 0 ||
+        input.sample3.trim().length === 0 ||
+        input.stopMessage.trim().length < 20 ||
+        input.optInMessage.trim().length < 20 ||
+        input.helpMessage.trim().length < 20
+      ) {
+        throw new Error(
+          "campaign samples and subscriber messages are incomplete",
+        );
       }
+      if (input.messageFlow.trim().length < 40) {
+        throw new Error("messageFlow must contain at least 40 characters");
+      }
+      required(input.optinKeywords, "optinKeywords");
+      required(input.optoutKeywords, "optoutKeywords");
+      required(input.helpKeywords, "helpKeywords");
       return client.campaigns.submit(projectId, input);
     },
     linkNumber: (input: SinchNumberLinkInput) => {
@@ -168,22 +250,25 @@ export const createSinchRegistrationManager = (
     registerTollFree: (input: SinchTollFreeVerificationInput) => {
       required(input.businessContactEmail, "businessContactEmail");
       required(input.businessName, "businessName");
+      required(input.businessRegistrationNumber, "businessRegistrationNumber");
       required(input.messageVolume, "messageVolume");
-      required(input.optInDescription, "optInDescription");
+      required(input.optInWorkflowDescription, "optInWorkflowDescription");
+      required(input.productionMessageContent, "productionMessageContent");
       required(input.useCase, "useCase");
-      assertHttps(input.website, "website");
-      if (input.optInImageUrls.length === 0) {
+      required(input.useCaseSummary, "useCaseSummary");
+      assertHttps(input.corporateWebsite, "corporateWebsite");
+      if (!/^\+[1-9]\d{6,14}$/.test(input.phoneNumber)) {
+        throw new Error("phoneNumber must be an E.164 address");
+      }
+      if (!/^\+[1-9]\d{6,14}$/.test(input.businessContactPhone)) {
+        throw new Error("businessContactPhone must be an E.164 address");
+      }
+      if (input.optInWorkflowImageUrls.length === 0) {
         throw new Error("at least one opt-in evidence image is required");
       }
-      input.optInImageUrls.forEach((url, index) =>
-        assertHttps(url, `optInImageUrls[${index}]`),
+      input.optInWorkflowImageUrls.forEach((url, index) =>
+        assertHttps(url, `optInWorkflowImageUrls[${index}]`),
       );
-      if (
-        input.sampleMessages.length === 0 ||
-        input.sampleMessages.some((sample) => sample.trim().length < 20)
-      ) {
-        throw new Error("at least one complete sample message is required");
-      }
       return client.tollFreeVerifications.submit(projectId, input);
     },
     inspect: async (
