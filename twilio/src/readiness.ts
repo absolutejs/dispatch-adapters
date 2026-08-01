@@ -93,6 +93,11 @@ export const inspectTwilioMessagingReadiness = async (input: {
   messagingServiceSid: string;
   /** Require an approved RCS sender in the Messaging Service sender pool. */
   requiresRcsSender?: boolean;
+  /** Required operator evidence because the sender-pool API does not expose RCS approval state. */
+  rcsAssertions?: {
+    advancedOptOutMitigationTested: boolean;
+    senderApproved: boolean;
+  };
   requiresUsA2PRegistration?: boolean;
   statusCallbackUrl: string;
   store: TwilioLifecycleStore;
@@ -168,6 +173,25 @@ export const inspectTwilioMessagingReadiness = async (input: {
             )
               ? ("pass" as const)
               : ("fail" as const),
+          },
+          {
+            id: "rcs-sender-approved",
+            message: "RCS sender approval was verified in Twilio",
+            source: "assertion" as const,
+            status:
+              input.rcsAssertions?.senderApproved === true
+                ? ("pass" as const)
+                : ("fail" as const),
+          },
+          {
+            id: "rcs-opt-out-mitigation",
+            message:
+              "RCS Advanced Opt-Out behavior and fallback mitigation were tested",
+            source: "assertion" as const,
+            status:
+              input.rcsAssertions?.advancedOptOutMitigationTested === true
+                ? ("pass" as const)
+                : ("fail" as const),
           },
         ]
       : []),

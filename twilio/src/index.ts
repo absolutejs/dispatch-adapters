@@ -13,19 +13,40 @@ export {
   type TwilioA2PBrandRegistrationInput,
   type TwilioA2PCampaignRegistrationInput,
   type TwilioComplianceClientLike,
+  type TwilioComplianceEmbeddableSession,
   type TwilioComplianceInspectionTarget,
   type TwilioComplianceResource,
   type TwilioComplianceStatusCheck,
   type TwilioComplianceStatusReport,
   type TwilioTollFreeVerificationInput,
+  type TwilioTollFreeEmbeddableInquiryInput,
 } from "./complianceRegistration";
 export {
   createMemoryTwilioIdempotencyStore,
   createPostgresTwilioIdempotencyStore,
+  fingerprintTwilioPayload,
   TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA,
+  TwilioIdempotencyConflictError,
+  TwilioIdempotencyIndeterminateError,
   type TwilioIdempotencyClaim,
+  type TwilioIdempotencyOutcome,
+  type TwilioIdempotencyScope,
   type TwilioIdempotencyStore,
 } from "./idempotency";
+export {
+  createMemoryTwilioEventStreamStore,
+  createPostgresTwilioEventStreamStore,
+  createTwilioEventStreamHandler,
+  createTwilioEventStreamProcessor,
+  drainTwilioEventStreamInbox,
+  TWILIO_EVENT_STREAM_POSTGRES_SCHEMA,
+  type CreateTwilioEventStreamHandlerOptions,
+  type TwilioCloudEvent,
+  type TwilioEventStreamClaim,
+  type TwilioEventStreamStore,
+  type TwilioEventStreamStoreOptions,
+  type TwilioEventStreamWorkItem,
+} from "./eventStreams";
 export {
   classifyTwilioStatusTransition,
   createMemoryTwilioLifecycleStore,
@@ -35,7 +56,9 @@ export {
   type TwilioInboundMedia,
   type TwilioLifecycleDisposition,
   type TwilioLifecycleClaim,
+  type TwilioLifecycleRetentionOptions,
   type TwilioLifecycleStore,
+  type TwilioLifecycleWorkItem,
   type TwilioMessageStatus,
   type TwilioOptOutType,
   type TwilioStatusEvent,
@@ -45,6 +68,8 @@ export {
   createPostgresTwilioLifecycleStore,
   TWILIO_LIFECYCLE_POSTGRES_SCHEMA,
   type TwilioPostgresClient,
+  type TwilioPostgresConnection,
+  type TwilioPostgresPool,
 } from "./postgresLifecycle";
 export {
   checkTwilioMessagingReadiness,
@@ -55,10 +80,20 @@ export {
   type TwilioReadinessReport,
 } from "./readiness";
 export {
+  createTwilioScheduledMessageManager,
+  type TwilioScheduledMessageClientLike,
+  type TwilioScheduledMessageReport,
+  type TwilioScheduledMessageResource,
+  type TwilioScheduledMessageStatus,
+} from "./scheduling";
+export {
   createTwilioWebhookHandler,
   createTwilioWebhookProcessor,
+  deliverTwilioWebhookEvent,
+  drainTwilioWebhookInbox,
   parseTwilioWebhookEvent,
   TwilioWebhookError,
   type CreateTwilioWebhookHandlerOptions,
+  type TwilioWebhookAccountConfiguration,
   type TwilioWebhookProcessingResult,
 } from "./webhooks";

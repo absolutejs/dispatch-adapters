@@ -72,7 +72,7 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
       }),
       title: "Twilio",
       wiring: {
-        code: "createTwilioAdapter({ client: new Twilio(${env.TWILIO_ACCOUNT_SID}, ${env.TWILIO_AUTH_TOKEN}), ...${settings} })",
+        code: "createTwilioAdapter({ accountSid: ${env.TWILIO_ACCOUNT_SID}, client: new Twilio(${env.TWILIO_ACCOUNT_SID}, ${env.TWILIO_AUTH_TOKEN}), ...${settings} })",
         imports: [
           {
             from: "@absolutejs/dispatch-twilio",

@@ -1,82 +1,76 @@
 # @absolutejs/dispatch-twilio
 
-Production Twilio SMS, MMS, RCS, and WhatsApp for
-[`@absolutejs/dispatch`](https://github.com/absolutejs/dispatch): Messaging
-Service sending, signed lifecycle webhooks, normalized delivery and consent
-events, enforceable consent, registration automation, retry-safe persistence
-boundaries, and operational readiness checks.
-
-This package supplies application infrastructure. Twilio still owns carrier
-registration and enforcement, and the application owner remains responsible
-for lawful consent and correct campaign configuration.
+Production Twilio SMS, MMS, RCS, and WhatsApp for `@absolutejs/dispatch`, with
+consent enforcement, signed webhooks and Event Streams, carrier-registration
+helpers, bounded durable inboxes, and operational readiness checks.
 
 ## Install
 
 ```sh
 bun add @absolutejs/dispatch @absolutejs/dispatch-twilio twilio
-```
-
-Add `@absolutejs/compliance` when using the shared consent ledger:
-
-```sh
-bun add @absolutejs/compliance
+bun add @absolutejs/compliance # when using the shared consent ledger
 ```
 
 ## Send alerts
 
-The adapter deliberately requires a Messaging Service and a public status callback.
-Every message therefore stays inside the service's sender pool, campaign, and
-opt-out policy.
+Every send uses a Twilio Messaging Service and a public status callback.
 
 ```ts
 import { createDispatcher } from "@absolutejs/dispatch";
 import { createTwilioAdapter } from "@absolutejs/dispatch-twilio";
 import { Twilio } from "twilio";
 
-const client = new Twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!,
-);
+const accountSid = process.env.TWILIO_ACCOUNT_SID!;
+const client = new Twilio(accountSid, process.env.TWILIO_AUTH_TOKEN!);
 
 const dispatcher = createDispatcher({
   sms: createTwilioAdapter({
+    accountSid,
     client,
     messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
     statusCallbackUrl: "https://app.example.com/webhooks/twilio/messaging",
-    validityPeriod: 300,
     smartEncoded: true,
+    validityPeriod: 300,
   }),
 });
 
-const result = await dispatcher.sms({
+await dispatcher.sms({
   body: "CPU usage has exceeded 90%.",
+  consent: {
+    programId: "pro-alerts",
+    purpose: "incident-alerts",
+    deliveryTransports: ["sms"],
+  },
+  privacy: {
+    addressRetention: "obfuscate",
+    contentRetention: "discard",
+  },
   tenant: "tenant-a",
   to: "+12025550100",
 });
-
-console.log(result.id); // SM...
 ```
 
-### RCS with fallback
-
-Add an approved RCS sender to the Messaging Service sender pool. An E.164
-recipient tries RCS first and lets Twilio fall back to SMS/MMS:
+RCS automatic fallback must declare consent for both possible routes:
 
 ```ts
 await dispatcher.sms({
   body: "CPU usage has exceeded 90%.",
   channel: "rcs",
-  rcs: { fallbackFrom: "+12025550199" },
+  consent: {
+    programId: "pro-alerts",
+    purpose: "incident-alerts",
+    deliveryTransports: ["rcs", "sms"],
+  },
+  rcs: { fallback: "automatic", fallbackFrom: "+12025550199" },
   to: "+12025550100",
 });
 ```
 
-Set `rcs.fallback` to `"disabled"` (or use a `rcs:+E164` recipient) when the
-message must not fall back. Templates and HTTPS media use the same
-`template` and `mediaUrls` fields as the other messaging channels.
+Set `rcs.fallback` to `"disabled"` when fallback is prohibited. Templates use
+a Twilio `HX` Content SID and are mutually exclusive with `body` and
+`mediaUrls`.
 
-The dispatch contract also supports MMS media, WhatsApp destinations, Twilio
-Content templates, scheduled sends, and durable idempotency keys:
+### Idempotency and tenant isolation
 
 ```ts
 import {
@@ -84,83 +78,29 @@ import {
   TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA,
 } from "@absolutejs/dispatch-twilio";
 
-const idempotencyStore = createPostgresTwilioIdempotencyStore(postgres);
 const adapter = createTwilioAdapter({
+  accountSid,
   client,
-  idempotencyStore,
+  idempotencyStore: createPostgresTwilioIdempotencyStore(postgresPool),
   messagingServiceSid,
   statusCallbackUrl,
   resolveTenant: (tenant) => tenantTwilioConfiguration(tenant),
 });
-
-await adapter.send({
-  channel: "whatsapp",
-  idempotencyKey: "incident-42:opened",
-  template: { id: "HX...", variables: { incident: "42" } },
-  tenant: "tenant-a",
-  to: "whatsapp:+12025550100",
-});
 ```
 
-Apply `TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA` once before using the supplied
-Postgres store. A key is claimed atomically before Twilio is called; completed
-results are replayed and active claims fail with
-`TwilioIdempotencyInFlightError`. Use a stable business-operation key, not a
-random value generated on every retry.
+Apply `TWILIO_IDEMPOTENCY_POSTGRES_SCHEMA` first. The pool must expose
+`connect()` so transactions use one checked-out connection. Keys are scoped by
+Twilio account and tenant, bound to a canonical payload fingerprint, and fenced.
+Completed results are replayed. Conflicting payloads fail. An ambiguous network
+result becomes `TwilioIdempotencyIndeterminateError` instead of being sent
+again.
 
-A per-message `from` may pin a sender, but the Messaging Service SID is still
-sent. Twilio will require that number to belong to the service's sender pool.
-Destinations and explicit senders must use E.164 format. `validityPeriod` must
-be 1–36,000 seconds.
+Provider-native scheduling is disabled by default. Prefer an application queue
+that re-evaluates consent immediately before sending. Explicit native schedules
+must be 15 minutes to 35 days away and cannot carry a consent scope. Use
+`createTwilioScheduledMessageManager()` to inspect or cancel them.
 
-## Handle delivery and consent webhooks
-
-Twilio signs messaging webhooks with the account auth token. The handler below
-accepts form-encoded callbacks only after validating `X-Twilio-Signature`
-against the exact public URL and all received parameters.
-
-```ts
-import {
-  createTwilioWebhookHandler,
-  type TwilioLifecycleStore,
-} from "@absolutejs/dispatch-twilio";
-
-const lifecycleStore: TwilioLifecycleStore = durableLifecycleStore;
-
-const handleTwilioWebhook = createTwilioWebhookHandler({
-  authToken: process.env.TWILIO_AUTH_TOKEN!,
-  expectedAccountSid: process.env.TWILIO_ACCOUNT_SID!,
-  expectedMessagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
-  publicUrl: "https://app.example.com/webhooks/twilio/messaging",
-  store: lifecycleStore,
-  onEvent: async (event) => {
-    if (event.kind === "status") {
-      // accepted | scheduled | queued | sending | sent | delivered |
-      // undelivered | failed | canceled | read
-      await alerts.recordDelivery(event);
-      return;
-    }
-
-    if (event.kind === "consent") {
-      // Twilio Advanced Opt-Out emits STOP, START, or HELP as OptOutType.
-      await consent.record(event);
-      return;
-    }
-
-    // Ordinary inbound SMS/MMS/WhatsApp replies include normalized media.
-    await inbox.record(event);
-  },
-});
-
-// Mount with any Request/Response-compatible server.
-app.post("/webhooks/twilio/messaging", ({ request }) =>
-  handleTwilioWebhook(request),
-);
-```
-
-To make opt-outs enforceable before a provider call, connect signed START and
-STOP events to `@absolutejs/compliance`. The application resolves the exact
-tenant, sender, and topic because those are product concepts:
+## Consent and signed messaging webhooks
 
 ```ts
 import {
@@ -168,152 +108,118 @@ import {
   createMessagingConsentLedger,
   createPostgresMessagingConsentStore,
 } from "@absolutejs/compliance";
+import {
+  createPostgresTwilioLifecycleStore,
+  createTwilioWebhookHandler,
+} from "@absolutejs/dispatch-twilio";
 
 const consent = createMessagingConsentLedger({
   audit,
-  store: createPostgresMessagingConsentStore(postgres),
+  store: createPostgresMessagingConsentStore(postgresPool),
 });
-
-const dispatcher = createDispatcher({
-  policies: [createMessagingConsentDispatchPolicy({ ledger: consent })],
-  sms: createTwilioAdapter({ client, messagingServiceSid, statusCallbackUrl }),
-});
+const lifecycleStore = createPostgresTwilioLifecycleStore(postgresPool);
 
 const handleTwilioWebhook = createTwilioWebhookHandler({
-  authToken,
-  expectedAccountSid,
-  publicUrl: statusCallbackUrl,
+  publicUrl: "https://app.example.com/webhooks/twilio/messaging",
+  resolveAccount: (untrustedAccountSid) =>
+    accountDirectory.get(untrustedAccountSid),
   store: lifecycleStore,
   consent: {
     ledger: consent,
-    resolveScope: (event) => ({
-      recipient: event.from!,
-      senderId: "acme",
-      tenant: "tenant-a",
-      topic: "incident-alerts",
-      transport: "sms",
-    }),
+    resolveScopes: (event) =>
+      ["sms", "rcs"].map((transport) => ({
+        programId: "pro-alerts",
+        purpose: "incident-alerts",
+        recipient: event.from!,
+        tenant: "tenant-a",
+        transport,
+      })),
   },
   onEvent: async (event) => alerts.recordTwilioEvent(event),
 });
-
-await consent.grant(
-  {
-    recipient: "+12025550100",
-    senderId: "acme",
-    tenant: "tenant-a",
-    topic: "incident-alerts",
-    transport: "sms",
-  },
-  { at: Date.now(), reference: "settings-form-v3", source: "product-settings" },
-);
-
-await dispatcher.sms({
-  body: "CPU usage has exceeded 90%.",
-  consent: { senderId: "acme", topic: "incident-alerts" },
-  tenant: "tenant-a",
-  to: "+12025550100",
-});
 ```
 
-Apply `MESSAGING_CONSENT_POSTGRES_SCHEMA` before constructing the Postgres
-store. Missing consent and revoked scopes are denied before Twilio is called.
-Webhook retry deduplication uses the signed Twilio event identity.
+`resolveAccount` returns only known `{ accountSid, authTokens,
+messagingServiceSids? }` records. Put the current token first and a still-valid
+previous token second during rotation. The fixed `publicUrl` is used for
+signature validation; forwarded host/protocol headers are not trusted.
 
-`publicUrl` is fixed configuration and is the exact HTTPS URL Twilio signs.
-The handler does not trust forwarded host/protocol headers. It also binds each
-request to the expected account and, when supplied, Messaging Service.
+START and STOP may resolve to multiple program transports so fallback consent
+stays synchronized. Twilio's RCS Advanced Opt-Out behavior has provider
+limitations, so production readiness requires an explicit tested mitigation.
 
-### Durable lifecycle store
+### Durable lifecycle inbox
 
-The store is an atomic inbox boundary:
+Apply `TWILIO_LIFECYCLE_POSTGRES_SCHEMA` before constructing the Postgres
+store. It atomically deduplicates events, rejects status regressions, and leases
+consumer work. It accepts both `SM` and `MM` SIDs, records the actual fallback
+transport, and includes interactive `ButtonPayload`/`ButtonText` fields.
 
-```ts
-type TwilioLifecycleStore = {
-  durability: "durable" | "memory";
-  begin(event): Promise<{
-    disposition: "accepted" | "duplicate" | "stale";
-    claimToken?: string;
-    previousStatus?: TwilioMessageStatus;
-  }>;
-  complete(eventId, claimToken): Promise<void>;
-  release(eventId, claimToken): Promise<void>;
-};
-```
+Raw form payloads are discarded by default. Normalized recovery data has a
+seven-day default retention window and configurable address/content redaction.
+Use `exportMessage()` and `purgeExpired()` for privacy workflows. Run
+`drainTwilioWebhookInbox()` from a worker so accepted work survives beyond
+Twilio's retry window.
 
-`begin` must atomically deduplicate `event.eventId`, reject status regressions,
-and lease pending consumer work to one worker. It must recheck status ordering
-when reclaiming pending work so an old callback cannot run after a newer
-terminal state. Durable implementations must expire abandoned leases.
-`complete` closes the inbox item; `release` makes it available after a consumer
-failure. Consumers should also use `eventId` as an idempotency key because no
-webhook system can make an external side effect and an inbox commit atomic
-without shared storage.
+## Event Streams
 
-`createMemoryTwilioLifecycleStore()` is supplied for tests and local
-development. For production, apply `TWILIO_LIFECYCLE_POSTGRES_SCHEMA` and use
-`createPostgresTwilioLifecycleStore(postgres)`. The readiness checker always
-rejects memory storage.
+`createTwilioEventStreamHandler()` validates the raw JSON body signature and
+handles CloudEvent batches. Use `createPostgresTwilioEventStreamStore()` after
+applying `TWILIO_EVENT_STREAM_POSTGRES_SCHEMA`; it provides atomic deduplication,
+bounded retention, optional product-specific redaction, and recovery through
+`drainTwilioEventStreamInbox()`.
 
-Use `createTwilioWebhookProcessor()` instead of the Response-returning handler
-when a framework needs control over its own response format.
-
-## Operational readiness
-
-### Registration submission and status
-
-The compliance manager validates common evidence constraints before submitting
-Twilio A2P brand/campaign or toll-free verification requests. It can then
-inspect the live provider states:
+## Carrier compliance and ISV onboarding
 
 ```ts
-import { createTwilioComplianceManager } from "@absolutejs/dispatch-twilio";
-
 const registration = createTwilioComplianceManager(client);
 
-const brand = await registration.registerA2PBrand({
-  customerProfileBundleSid,
-  a2PProfileBundleSid,
-  brandType: "STANDARD",
-});
-
 const campaign = await registration.registerA2PCampaign(messagingServiceSid, {
-  brandRegistrationSid: brand.sid,
-  description: "Operational alerts selected by Pro-tier account owners.",
-  messageFlow: "Customers enable alerts in settings and can text STOP.",
+  brandRegistrationSid,
+  description,
+  messageFlow,
   messageSamples: [sampleOne, sampleTwo],
   usAppToPersonUsecase: "ACCOUNT_NOTIFICATION",
   hasEmbeddedLinks: false,
   hasEmbeddedPhone: false,
-  subscriberOptIn: true,
   privacyPolicyUrl,
   termsAndConditionsUrl,
 });
 
-const registrationStatus = await registration.inspect({
+const status = await registration.inspect({
+  kind: "a2p",
   customerProfileSid,
-  brandRegistrationSid: brand.sid,
+  brandRegistrationSid,
   messagingServiceSid,
   campaignSid: campaign.sid,
-  tollfreeVerificationSid,
 });
 ```
 
-`submitTollFreeVerification()` covers the corresponding Twilio submission.
-Status checks are `pass`, `pending`, or `fail`; `ready` becomes true only when
-every requested resource is approved.
+Inspection targets are complete discriminated workflows, so a partial set of
+green resources cannot report ready. Toll-free submission requires its Trust
+Hub profile and current business registration fields; failed checks expose
+rejection reasons, error codes, and edit/resubmission windows.
+
+ISVs can call `initializeTollFreeEmbeddableInquiry()` to obtain the inquiry ID
+and ephemeral session token for Twilio's Compliance Embeddable. Keep Twilio
+credentials server-side and expose that token only to the authenticated end
+customer.
+
+## Operational readiness
 
 ```ts
-import { inspectTwilioMessagingReadiness } from "@absolutejs/dispatch-twilio";
-
 const report = await inspectTwilioMessagingReadiness({
   client,
-  expectedAccountSid: process.env.TWILIO_ACCOUNT_SID!,
-  inboundWebhookUrl: "https://app.example.com/webhooks/twilio/inbound",
-  messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
+  expectedAccountSid: accountSid,
+  inboundWebhookUrl,
+  messagingServiceSid,
   requiresUsA2PRegistration: true,
   requiresRcsSender: true,
-  statusCallbackUrl: "https://app.example.com/webhooks/twilio/messaging",
+  rcsAssertions: {
+    senderApproved: true,
+    advancedOptOutMitigationTested: true,
+  },
+  statusCallbackUrl,
   store: lifecycleStore,
   assertions: {
     consentEvidenceStored: true,
@@ -322,33 +228,12 @@ const report = await inspectTwilioMessagingReadiness({
     termsPublished: true,
   },
 });
-
-if (!report.ready) throw new Error("Twilio messaging is not production ready");
 ```
 
-This API inspects the Messaging Service/account binding, inbound POST URL,
-status callback, sender pool, and optional US A2P attachment using Twilio's API.
-Consent, Advanced Opt-Out testing, privacy, and terms remain operator
-assertions. The report scope is always `operational-not-legal-certification`.
-
-Before production, configure and test a Twilio Messaging Service, its sender
-pool, applicable carrier registration (such as US A2P 10DLC), Advanced Opt-Out,
-the inbound webhook, the status callback, consent evidence, privacy policy, and
-messaging terms. Twilio recommends SDK signature validation because webhook
-fields may evolve; this package uses the official SDK validator.
-
-## Breaking changes from 0.0.x
-
-- `messagingServiceSid` and `statusCallbackUrl` are required.
-- `defaultFrom` and service-or-number sender precedence were removed.
-- A per-message `from` augments rather than replaces the Messaging Service.
-- E.164 numbers, service SIDs, HTTPS callbacks, non-empty bodies, and validity
-  periods are validated before calling Twilio.
-- Response-level failures throw the typed `TwilioSendError`.
-
-`0.0.x` was a preview and has no compatibility aliases in `0.1.0`.
+The report checks account/service binding, webhook configuration, sender pools,
+A2P attachment, durable storage, consent, policy disclosures, RCS approval, and
+opt-out testing. Its scope is always `operational-not-legal-certification`.
 
 ## License
 
-[Apache 2.0](../LICENSE). Tier B substrate-adjacent — rides
-`@absolutejs/dispatch` (BSL Tier A) and `twilio` (MIT).
+[Apache 2.0](../LICENSE).

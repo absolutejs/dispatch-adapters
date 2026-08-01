@@ -1,8 +1,15 @@
 import type { SmsAdapter, SmsMessage } from "@absolutejs/dispatch";
-import type { TwilioIdempotencyStore } from "./idempotency";
+import {
+  fingerprintTwilioPayload,
+  TwilioIdempotencyIndeterminateError,
+  type TwilioIdempotencyScope,
+  type TwilioIdempotencyStore,
+} from "./idempotency";
 
 export type TwilioMessageCreateParams = {
+  addressRetention?: "obfuscate" | "retain";
   body?: string;
+  contentRetention?: "discard" | "retain";
   contentSid?: string;
   contentVariables?: string;
   from?: string;
@@ -29,6 +36,10 @@ export type TwilioClientLike = {
 };
 
 export type CreateTwilioAdapterOptions = {
+  /** Explicit opt-in to provider-side scheduling. Consent-scoped sends remain prohibited. */
+  allowNativeScheduling?: boolean;
+  /** Twilio account owning the default client and Messaging Service. */
+  accountSid: string;
   client: TwilioClientLike;
   idempotencyStore?: TwilioIdempotencyStore;
   /** Twilio Messaging Service used for every message. */
@@ -43,9 +54,12 @@ export type CreateTwilioAdapterOptions = {
   smartEncoded?: boolean;
   /** Seconds Twilio may keep trying to send. Twilio accepts 1–36,000. */
   validityPeriod?: number;
+  /** Injectable clock for scheduling validation and deterministic tests. */
+  now?: () => number;
 };
 
 export type TwilioTenantConfiguration = {
+  accountSid: string;
   client?: TwilioClientLike;
   from?: string;
   messagingServiceSid: string;
@@ -74,9 +88,15 @@ const E164 = /^\+[1-9]\d{1,14}$/;
 const RCS_RECIPIENT = /^rcs:\+[1-9]\d{1,14}$/;
 const WHATSAPP = /^whatsapp:\+[1-9]\d{1,14}$/;
 const MESSAGING_SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
+const ACCOUNT_SID = /^AC[0-9a-fA-F]{32}$/;
 const CONTENT_SID = /^HX[0-9a-fA-F]{32}$/;
 
 const assertConfiguration = (options: CreateTwilioAdapterOptions) => {
+  if (!ACCOUNT_SID.test(options.accountSid)) {
+    throw new TwilioConfigurationError(
+      "accountSid must be a Twilio Account SID (AC followed by 32 hexadecimal characters)",
+    );
+  }
   if (!MESSAGING_SERVICE_SID.test(options.messagingServiceSid)) {
     throw new TwilioConfigurationError(
       "messagingServiceSid must be a Twilio Messaging Service SID (MG followed by 32 hexadecimal characters)",
@@ -114,7 +134,10 @@ const assertConfiguration = (options: CreateTwilioAdapterOptions) => {
   }
 };
 
-const assertMessage = (message: SmsMessage) => {
+const assertMessage = (
+  message: SmsMessage,
+  options: Pick<CreateTwilioAdapterOptions, "allowNativeScheduling" | "now">,
+) => {
   const channel = message.channel ?? "sms";
   if (
     (channel === "whatsapp" && !WHATSAPP.test(message.to)) ||
@@ -147,6 +170,18 @@ const assertMessage = (message: SmsMessage) => {
       );
     }
   }
+  if (message.consent !== undefined && channel === "rcs") {
+    const declared = new Set(message.consent.deliveryTransports);
+    const required =
+      message.rcs?.fallback === "automatic" ? ["rcs", "sms"] : ["rcs"];
+    if (
+      required.some((transport) => !declared.has(transport as "rcs" | "sms"))
+    ) {
+      throw new TwilioConfigurationError(
+        "consent.deliveryTransports must include every RCS delivery route, including sms when automatic fallback is enabled",
+      );
+    }
+  }
   if (channel === "rcs" && message.from !== undefined) {
     throw new TwilioConfigurationError(
       "RCS sender comes from the Messaging Service pool; use rcs.fallbackFrom for fallback",
@@ -161,12 +196,15 @@ const assertMessage = (message: SmsMessage) => {
       "SMS sender must be an E.164 phone number",
     );
   }
+  const hasMedia = (message.mediaUrls?.length ?? 0) > 0;
   if (
-    message.body?.trim().length !== 0 &&
     message.body === undefined &&
-    message.template === undefined
+    message.template === undefined &&
+    !hasMedia
   ) {
-    throw new TwilioConfigurationError("message body or template is required");
+    throw new TwilioConfigurationError(
+      "message body, media, or template is required",
+    );
   }
   if (message.body !== undefined && message.body.trim().length === 0) {
     throw new TwilioConfigurationError("message body must not be empty");
@@ -177,6 +215,14 @@ const assertMessage = (message: SmsMessage) => {
   ) {
     throw new TwilioConfigurationError(
       "template id must be a Twilio Content SID",
+    );
+  }
+  if (
+    message.template !== undefined &&
+    (message.body !== undefined || hasMedia)
+  ) {
+    throw new TwilioConfigurationError(
+      "Twilio ContentSid replaces body and mediaUrls; template content must be exclusive",
     );
   }
   for (const mediaUrl of message.mediaUrls ?? []) {
@@ -194,9 +240,24 @@ const assertMessage = (message: SmsMessage) => {
   }
   if (message.sendAt !== undefined) {
     const sendAt = new Date(message.sendAt);
-    if (Number.isNaN(sendAt.valueOf()) || sendAt.valueOf() <= Date.now()) {
+    const now = options.now?.() ?? Date.now();
+    if (options.allowNativeScheduling !== true) {
       throw new TwilioConfigurationError(
-        "sendAt must be a future ISO-8601 time",
+        "native scheduling is disabled; enqueue the dispatch operation so consent is re-evaluated at send time",
+      );
+    }
+    if (message.consent !== undefined) {
+      throw new TwilioConfigurationError(
+        "consent-scoped messages must be scheduled through an application queue and re-evaluated at send time",
+      );
+    }
+    if (
+      Number.isNaN(sendAt.valueOf()) ||
+      sendAt.valueOf() < now + 15 * 60_000 ||
+      sendAt.valueOf() > now + 35 * 24 * 60 * 60_000
+    ) {
+      throw new TwilioConfigurationError(
+        "sendAt must be between 15 minutes and 35 days in the future",
       );
     }
   }
@@ -210,117 +271,168 @@ export const createTwilioAdapter = (
   return {
     name: "twilio",
     send: async (message) => {
-      assertMessage(message);
-      const claim = message.idempotencyKey
-        ? await options.idempotencyStore?.begin(message.idempotencyKey)
-        : undefined;
-      if (message.idempotencyKey && claim === undefined) {
+      assertMessage(message, options);
+      const tenant =
+        message.tenant === undefined
+          ? undefined
+          : await options.resolveTenant?.(message.tenant);
+      const accountSid = tenant?.accountSid ?? options.accountSid;
+      const client = tenant?.client ?? options.client;
+      const messagingServiceSid =
+        tenant?.messagingServiceSid ?? options.messagingServiceSid;
+      const statusCallback =
+        tenant?.statusCallbackUrl ?? options.statusCallbackUrl;
+      assertConfiguration({
+        ...options,
+        accountSid,
+        messagingServiceSid,
+        statusCallbackUrl: statusCallback,
+      });
+      const params: TwilioMessageCreateParams = {
+        ...(message.privacy?.addressRetention === undefined
+          ? {}
+          : { addressRetention: message.privacy.addressRetention }),
+        ...(message.body === undefined ? {} : { body: message.body }),
+        ...(message.mediaUrls === undefined
+          ? {}
+          : { mediaUrl: [...message.mediaUrls] }),
+        ...(message.template === undefined
+          ? {}
+          : {
+              contentSid: message.template.id,
+              ...(message.template.variables === undefined
+                ? {}
+                : {
+                    contentVariables: JSON.stringify(
+                      message.template.variables,
+                    ),
+                  }),
+            }),
+        ...(message.privacy?.contentRetention === undefined
+          ? {}
+          : { contentRetention: message.privacy.contentRetention }),
+        messagingServiceSid,
+        statusCallback,
+        to:
+          message.channel === "rcs" &&
+          message.rcs?.fallback === "disabled" &&
+          E164.test(message.to)
+            ? `rcs:${message.to}`
+            : message.to,
+      };
+      if (message.rcs?.fallbackFrom !== undefined) {
+        params.fallbackFrom = message.rcs.fallbackFrom;
+      }
+      const from =
+        message.channel === "rcs" ? undefined : (message.from ?? tenant?.from);
+      if (
+        from !== undefined &&
+        ((message.channel === "whatsapp" && !WHATSAPP.test(from)) ||
+          (message.channel !== "whatsapp" && !E164.test(from)))
+      ) {
+        throw new TwilioConfigurationError(
+          "resolved sender must match the selected messaging channel",
+        );
+      }
+      if (from !== undefined) params.from = from;
+      if (message.sendAt !== undefined) {
+        params.scheduleType = "fixed";
+        params.sendAt = new Date(message.sendAt);
+      }
+      if (options.smartEncoded !== undefined) {
+        params.smartEncoded = options.smartEncoded;
+      }
+      if (options.validityPeriod !== undefined) {
+        params.validityPeriod = options.validityPeriod;
+      }
+
+      const scope: TwilioIdempotencyScope | undefined =
+        message.idempotencyKey === undefined
+          ? undefined
+          : {
+              accountSid,
+              key: message.idempotencyKey,
+              ...(message.tenant === undefined
+                ? {}
+                : { tenant: message.tenant }),
+            };
+      const claim =
+        scope === undefined
+          ? undefined
+          : await options.idempotencyStore?.begin(
+              scope,
+              fingerprintTwilioPayload(params),
+            );
+      if (scope !== undefined && claim === undefined) {
         throw new TwilioConfigurationError(
           "idempotencyStore is required when idempotencyKey is set",
         );
       }
-      if (claim?.disposition === "completed") return claim.result;
+      if (claim?.disposition === "completed") {
+        if (claim.outcome.kind === "provider-error") {
+          throw new TwilioSendError(claim.outcome.code, claim.outcome.message);
+        }
+        return claim.outcome.result;
+      }
       if (claim?.disposition === "in-flight") {
         throw new TwilioIdempotencyInFlightError(
-          "a send with this idempotency key is already in flight",
+          "a send with this account, tenant, and idempotency key is already in flight",
+        );
+      }
+      if (claim?.disposition === "indeterminate") {
+        throw new TwilioIdempotencyIndeterminateError(
+          "Twilio may have accepted this send; reconcile it before retrying with a new key",
         );
       }
       const claimToken =
         claim?.disposition === "claimed" ? claim.token : undefined;
-      try {
-        const tenant =
-          message.tenant === undefined
-            ? undefined
-            : await options.resolveTenant?.(message.tenant);
-        const client = tenant?.client ?? options.client;
-        const messagingServiceSid =
-          tenant?.messagingServiceSid ?? options.messagingServiceSid;
-        const statusCallback =
-          tenant?.statusCallbackUrl ?? options.statusCallbackUrl;
-        assertConfiguration({
-          ...options,
-          messagingServiceSid,
-          statusCallbackUrl: statusCallback,
-        });
-        const params: TwilioMessageCreateParams = {
-          ...(message.body === undefined ? {} : { body: message.body }),
-          ...(message.mediaUrls === undefined
-            ? {}
-            : { mediaUrl: [...message.mediaUrls] }),
-          ...(message.template === undefined
-            ? {}
-            : {
-                contentSid: message.template.id,
-                ...(message.template.variables === undefined
-                  ? {}
-                  : {
-                      contentVariables: JSON.stringify(
-                        message.template.variables,
-                      ),
-                    }),
-              }),
-          messagingServiceSid,
-          statusCallback,
-          to:
-            message.channel === "rcs" &&
-            message.rcs?.fallback === "disabled" &&
-            E164.test(message.to)
-              ? `rcs:${message.to}`
-              : message.to,
-        };
-        if (message.rcs?.fallbackFrom !== undefined) {
-          params.fallbackFrom = message.rcs.fallbackFrom;
+      if (scope !== undefined && claimToken !== undefined) {
+        try {
+          await options.idempotencyStore!.markExecuting(scope, claimToken);
+        } catch (error) {
+          await options
+            .idempotencyStore!.releasePrepared(scope, claimToken)
+            .catch(() => undefined);
+          throw error;
         }
-        const from =
-          message.channel === "rcs"
-            ? undefined
-            : (message.from ?? tenant?.from);
-        if (
-          from !== undefined &&
-          ((message.channel === "whatsapp" && !WHATSAPP.test(from)) ||
-            (message.channel !== "whatsapp" && !E164.test(from)))
-        ) {
-          throw new TwilioConfigurationError(
-            "resolved sender must match the selected messaging channel",
-          );
-        }
-        if (from !== undefined) params.from = from;
-        if (message.sendAt !== undefined) {
-          params.scheduleType = "fixed";
-          params.sendAt = new Date(message.sendAt);
-        }
-        if (options.smartEncoded !== undefined) {
-          params.smartEncoded = options.smartEncoded;
-        }
-        if (options.validityPeriod !== undefined) {
-          params.validityPeriod = options.validityPeriod;
-        }
+      }
 
-        const response = await client.messages.create(params);
-        if (response.errorCode !== null && response.errorCode !== undefined) {
-          throw new TwilioSendError(response.errorCode, response.errorMessage);
-        }
-        const result = {
-          at: Date.now(),
-          ...(response.sid === undefined ? {} : { id: response.sid }),
-          provider: "twilio",
-        };
-        if (message.idempotencyKey && claimToken) {
-          await options.idempotencyStore?.complete(
-            message.idempotencyKey,
-            claimToken,
-            result,
-          );
-        }
-        return result;
+      let response: Awaited<ReturnType<TwilioClientLike["messages"]["create"]>>;
+      try {
+        response = await client.messages.create(params);
       } catch (error) {
-        if (message.idempotencyKey && claimToken) {
-          await options.idempotencyStore
-            ?.release(message.idempotencyKey, claimToken)
+        if (scope !== undefined && claimToken !== undefined) {
+          await options
+            .idempotencyStore!.markIndeterminate(scope, claimToken)
             .catch(() => undefined);
         }
         throw error;
       }
+      if (response.errorCode !== null && response.errorCode !== undefined) {
+        if (scope !== undefined && claimToken !== undefined) {
+          await options.idempotencyStore!.complete(scope, claimToken, {
+            code: response.errorCode,
+            kind: "provider-error",
+            ...(response.errorMessage === null ||
+            response.errorMessage === undefined
+              ? {}
+              : { message: response.errorMessage }),
+          });
+        }
+        throw new TwilioSendError(response.errorCode, response.errorMessage);
+      }
+      const result = {
+        at: Date.now(),
+        ...(response.sid === undefined ? {} : { id: response.sid }),
+        provider: "twilio",
+      };
+      if (scope !== undefined && claimToken !== undefined) {
+        await options.idempotencyStore!.complete(scope, claimToken, {
+          kind: "success",
+          result,
+        });
+      }
+      return result;
     },
   };
 };

@@ -18,6 +18,38 @@ describe("lifecycle transitions", () => {
       "accepted",
     );
   });
+
+  test("bounds and redacts persisted webhook PII", async () => {
+    let now = 1_000;
+    const store = createMemoryTwilioLifecycleStore({
+      now: () => now,
+      retainAddresses: false,
+      retainContent: false,
+      retentionMs: 1_000,
+    });
+    const event = {
+      accountSid: `AC${"1".repeat(32)}`,
+      body: "secret",
+      eventId: "inbound:test",
+      from: "+12025550100",
+      kind: "inbound" as const,
+      media: [],
+      messageSid: `SM${"2".repeat(32)}`,
+      raw: { Body: "secret", From: "+12025550100" },
+      receivedAt: now,
+      to: "+12025550199",
+    };
+    const claim = await store.begin(event);
+    await store.complete(event.eventId, claim.claimToken!);
+    expect(await store.exportMessage(event.messageSid)).toEqual([
+      expect.objectContaining({ raw: {} }),
+    ]);
+    expect(await store.exportMessage(event.messageSid)).not.toEqual([
+      expect.objectContaining({ body: "secret" }),
+    ]);
+    now = 2_001;
+    expect(await store.purgeExpired()).toBe(1);
+  });
 });
 
 describe("readiness", () => {
@@ -45,8 +77,11 @@ describe("readiness", () => {
   test("passes only with durable storage and every operator assertion", () => {
     const store: TwilioLifecycleStore = {
       begin: async () => ({ claimToken: "claim", disposition: "accepted" }),
+      claimPending: async () => [],
       complete: async () => {},
       durability: "durable",
+      exportMessage: async () => [],
+      purgeExpired: async () => 0,
       release: async () => {},
     };
     expect(checkTwilioMessagingReadiness({ assertions, store }).ready).toBe(
@@ -63,8 +98,11 @@ describe("readiness", () => {
   test("inspects the live Messaging Service configuration", async () => {
     const store: TwilioLifecycleStore = {
       begin: async () => ({ claimToken: "claim", disposition: "accepted" }),
+      claimPending: async () => [],
       complete: async () => {},
       durability: "durable",
+      exportMessage: async () => [],
+      purgeExpired: async () => 0,
       release: async () => {},
     };
     const accountSid = `AC${"1".repeat(32)}`;
@@ -106,6 +144,10 @@ describe("readiness", () => {
       messagingServiceSid,
       requiresUsA2PRegistration: true,
       requiresRcsSender: true,
+      rcsAssertions: {
+        advancedOptOutMitigationTested: true,
+        senderApproved: true,
+      },
       statusCallbackUrl,
       store,
     });

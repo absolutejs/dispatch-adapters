@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] — 2026-08-01
+
+- Replace global idempotency with account/tenant scope, payload fingerprints, fencing, and fail-closed indeterminate outcomes.
+- Require checked-out PostgreSQL connections and add real contention gates.
+- Add bounded/redacted lifecycle retention, privacy export/purge, recovery workers, and signed Event Streams ingestion.
+- Add multi-account webhook credential resolution, token rotation, and Messaging Service allowlists.
+- Enforce program/purpose consent across every fallback route and prohibit consent-scoped native schedules.
+- Add schedule cancellation/reconciliation, SM/MM support, actual fallback transport, and interactive reply fields.
+- Require complete registration workflows and current business, Trust Hub, privacy, and terms fields; surface failure diagnostics.
+- Add Toll-Free Compliance Embeddable sessions and explicit RCS approval/opt-out readiness assertions.
+
 ## [0.3.0] — 2026-08-01
 
 ### Channels

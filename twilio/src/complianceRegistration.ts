@@ -21,16 +21,16 @@ export type TwilioA2PCampaignRegistrationInput = {
   optInMessage?: string;
   optOutKeywords?: string[];
   optOutMessage?: string;
-  privacyPolicyUrl?: string;
+  privacyPolicyUrl: string;
   subscriberOptIn?: boolean;
-  termsAndConditionsUrl?: string;
+  termsAndConditionsUrl: string;
   usAppToPersonUsecase: string;
 };
 
-export type TwilioTollFreeVerificationInput = {
+type TwilioTollFreeVerificationBase = {
   businessName: string;
   businessWebsite: string;
-  customerProfileSid?: string;
+  customerProfileSid: string;
   externalReferenceId?: string;
   messageVolume: string;
   notificationEmail: string;
@@ -42,16 +42,58 @@ export type TwilioTollFreeVerificationInput = {
     | "VERBAL"
     | "VIA_TEXT"
     | "WEB_FORM";
-  privacyPolicyUrl?: string;
+  privacyPolicyUrl: string;
   productionMessageSample: string;
-  termsAndConditionsUrl?: string;
+  termsAndConditionsUrl: string;
   tollfreePhoneNumberSid: string;
   useCaseCategories: string[];
   useCaseSummary: string;
 };
 
+export type TwilioTollFreeVerificationInput =
+  | (TwilioTollFreeVerificationBase & {
+      businessRegistrationAuthority?: never;
+      businessRegistrationCountry?: never;
+      businessRegistrationNumber?: never;
+      businessType: "SOLE_PROPRIETOR";
+    })
+  | (TwilioTollFreeVerificationBase & {
+      businessRegistrationAuthority:
+        | "ABN"
+        | "ACN"
+        | "BRN"
+        | "CBN"
+        | "CIF"
+        | "CNPJ"
+        | "CRN"
+        | "EIN"
+        | "NEQ"
+        | "NIF"
+        | "NZBN"
+        | "OTHER"
+        | "PROVINCIAL_NUMBER"
+        | "SIREN"
+        | "SIRET"
+        | "UID"
+        | "USt-IdNr"
+        | "VAT";
+      businessRegistrationCountry: string;
+      businessRegistrationNumber: string;
+      businessType:
+        | "GOVERNMENT"
+        | "NON_PROFIT"
+        | "PRIVATE_PROFIT"
+        | "PUBLIC_PROFIT";
+    });
+
 export type TwilioComplianceResource = {
   campaignStatus?: string;
+  editAllowed?: boolean;
+  editExpiration?: Date | string;
+  errorCode?: number;
+  failureReason?: string;
+  rejectionReason?: string;
+  rejectionReasons?: unknown[];
   sid: string;
   status?: string;
 };
@@ -74,20 +116,67 @@ export type TwilioComplianceClientLike = {
   };
   trusthub: {
     v1: {
+      complianceTollfreeInquiries: {
+        create: (
+          input: TwilioTollFreeEmbeddableInquiryInput,
+        ) => Promise<TwilioComplianceEmbeddableSession>;
+      };
       customerProfiles: (sid: string) => FetchContext;
     };
   };
 };
 
-export type TwilioComplianceInspectionTarget = {
-  brandRegistrationSid?: string;
-  campaignSid?: string;
-  customerProfileSid?: string;
-  messagingServiceSid?: string;
-  tollfreeVerificationSid?: string;
+export type TwilioTollFreeEmbeddableInquiryInput = {
+  businessName?: string;
+  businessRegistrationAuthority?: string;
+  businessRegistrationCountry?: string;
+  businessRegistrationNumber?: string;
+  businessType?:
+    | "GOVERNMENT"
+    | "NON_PROFIT"
+    | "PRIVATE_PROFIT"
+    | "PUBLIC_PROFIT"
+    | "SOLE_PROPRIETOR";
+  businessWebsite?: string;
+  customerProfileSid: string;
+  notificationEmail: string;
+  privacyPolicyUrl?: string;
+  termsAndConditionsUrl?: string;
+  themeSetId?: string;
+  tollfreePhoneNumber: string;
 };
 
+export type TwilioComplianceEmbeddableSession = {
+  inquiryId: string;
+  /** Ephemeral secret; expose only to the authenticated end customer's browser. */
+  inquirySessionToken: string;
+  registrationId: string;
+  url: string;
+};
+
+export type TwilioComplianceInspectionTarget =
+  | {
+      brandRegistrationSid: string;
+      campaignSid: string;
+      customerProfileSid: string;
+      kind: "a2p";
+      messagingServiceSid: string;
+    }
+  | {
+      customerProfileSid: string;
+      kind: "toll-free";
+      tollfreeVerificationSid: string;
+    };
+
 export type TwilioComplianceStatusCheck = {
+  diagnostics?: {
+    editAllowed?: boolean;
+    editExpiration?: string;
+    errorCode?: number;
+    failureReason?: string;
+    rejectionReason?: string;
+    rejectionReasons?: unknown[];
+  };
   id: "a2p-brand" | "a2p-campaign" | "customer-profile" | "toll-free";
   providerStatus: string;
   status: "fail" | "pass" | "pending";
@@ -100,6 +189,8 @@ export type TwilioComplianceStatusReport = {
 };
 
 const SID = /^[A-Z]{2}[0-9a-fA-F]{32}$/;
+const TOLL_FREE_E164 = /^\+1(?:800|833|844|855|866|877|888)\d{7}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const assertSid = (value: string, name: string, prefix?: string) => {
   if (!SID.test(value) || (prefix !== undefined && !value.startsWith(prefix))) {
@@ -148,27 +239,71 @@ const validateCampaign = (input: TwilioA2PCampaignRegistrationInput) => {
     ["privacyPolicyUrl", input.privacyPolicyUrl],
     ["termsAndConditionsUrl", input.termsAndConditionsUrl],
   ] as const) {
-    if (value !== undefined) assertHttps(value, name);
+    assertHttps(value, name);
   }
 };
 
 const validateTollFree = (input: TwilioTollFreeVerificationInput) => {
   assertSid(input.tollfreePhoneNumberSid, "tollfreePhoneNumberSid", "PN");
-  if (input.customerProfileSid !== undefined) {
-    assertSid(input.customerProfileSid, "customerProfileSid", "BU");
-  }
+  assertSid(input.customerProfileSid, "customerProfileSid", "BU");
   assertHttps(input.businessWebsite, "businessWebsite");
   for (const url of input.optInImageUrls) assertHttps(url, "optInImageUrls");
-  if (input.privacyPolicyUrl !== undefined)
-    assertHttps(input.privacyPolicyUrl, "privacyPolicyUrl");
-  if (input.termsAndConditionsUrl !== undefined)
-    assertHttps(input.termsAndConditionsUrl, "termsAndConditionsUrl");
+  assertHttps(input.privacyPolicyUrl, "privacyPolicyUrl");
+  assertHttps(input.termsAndConditionsUrl, "termsAndConditionsUrl");
+  if (input.businessType !== "SOLE_PROPRIETOR") {
+    for (const [name, value] of [
+      ["businessRegistrationNumber", input.businessRegistrationNumber],
+      ["businessRegistrationCountry", input.businessRegistrationCountry],
+      ["businessRegistrationAuthority", input.businessRegistrationAuthority],
+    ] as const) {
+      if (value.trim().length === 0) {
+        throw new TypeError(`${name} must not be empty`);
+      }
+    }
+  }
+};
+
+const validateTollFreeInquiry = (
+  input: TwilioTollFreeEmbeddableInquiryInput,
+) => {
+  assertSid(input.customerProfileSid, "customerProfileSid", "BU");
+  if (!TOLL_FREE_E164.test(input.tollfreePhoneNumber)) {
+    throw new TypeError(
+      "tollfreePhoneNumber must be a NANP toll-free E.164 number",
+    );
+  }
+  if (!EMAIL.test(input.notificationEmail)) {
+    throw new TypeError("notificationEmail must be a valid email address");
+  }
+  for (const [name, value] of [
+    ["businessWebsite", input.businessWebsite],
+    ["privacyPolicyUrl", input.privacyPolicyUrl],
+    ["termsAndConditionsUrl", input.termsAndConditionsUrl],
+  ] as const) {
+    if (value !== undefined) assertHttps(value, name);
+  }
+  if (
+    input.businessType !== undefined &&
+    input.businessType !== "SOLE_PROPRIETOR"
+  ) {
+    for (const [name, value] of [
+      ["businessRegistrationNumber", input.businessRegistrationNumber],
+      ["businessRegistrationCountry", input.businessRegistrationCountry],
+      ["businessRegistrationAuthority", input.businessRegistrationAuthority],
+    ] as const) {
+      if (value === undefined || value.trim().length === 0) {
+        throw new TypeError(`${name} is required for registered businesses`);
+      }
+    }
+  }
 };
 
 const classify = (
   id: TwilioComplianceStatusCheck["id"],
-  providerStatus: string,
+  resource: TwilioComplianceResource,
 ): TwilioComplianceStatusCheck => {
+  const providerStatus =
+    resource.campaignStatus ?? resource.status ?? "UNKNOWN";
   const normalized = providerStatus.toUpperCase().replaceAll("-", "_");
   const approved =
     normalized === "APPROVED" ||
@@ -179,6 +314,40 @@ const classify = (
     normalized.includes("REJECTED") ||
     normalized === "SUSPENDED";
   return {
+    ...(resource.rejectionReason !== undefined ||
+    resource.rejectionReasons !== undefined ||
+    resource.errorCode !== undefined ||
+    resource.failureReason !== undefined ||
+    resource.editAllowed !== undefined ||
+    resource.editExpiration !== undefined
+      ? {
+          diagnostics: {
+            ...(resource.editAllowed === undefined
+              ? {}
+              : { editAllowed: resource.editAllowed }),
+            ...(resource.editExpiration === undefined
+              ? {}
+              : {
+                  editExpiration:
+                    resource.editExpiration instanceof Date
+                      ? resource.editExpiration.toISOString()
+                      : resource.editExpiration,
+                }),
+            ...(resource.errorCode === undefined
+              ? {}
+              : { errorCode: resource.errorCode }),
+            ...(resource.failureReason === undefined
+              ? {}
+              : { failureReason: resource.failureReason }),
+            ...(resource.rejectionReason === undefined
+              ? {}
+              : { rejectionReason: resource.rejectionReason }),
+            ...(resource.rejectionReasons === undefined
+              ? {}
+              : { rejectionReasons: resource.rejectionReasons }),
+          },
+        }
+      : {}),
     id,
     providerStatus,
     status: approved ? "pass" : failed ? "fail" : "pending",
@@ -188,62 +357,58 @@ const classify = (
 export const createTwilioComplianceManager = (
   client: TwilioComplianceClientLike,
 ) => ({
+  initializeTollFreeEmbeddableInquiry: async (
+    input: TwilioTollFreeEmbeddableInquiryInput,
+  ) => {
+    validateTollFreeInquiry(input);
+    const session =
+      await client.trusthub.v1.complianceTollfreeInquiries.create(input);
+    if (
+      session.inquiryId.length === 0 ||
+      session.inquirySessionToken.length === 0 ||
+      session.registrationId.length === 0
+    ) {
+      throw new TypeError(
+        "Twilio returned an invalid Compliance Embeddable session",
+      );
+    }
+    return session;
+  },
   inspect: async (
     target: TwilioComplianceInspectionTarget,
   ): Promise<TwilioComplianceStatusReport> => {
-    if (
-      target.campaignSid !== undefined &&
-      target.messagingServiceSid === undefined
-    ) {
-      throw new TypeError("messagingServiceSid is required with campaignSid");
-    }
     const pending: Array<Promise<TwilioComplianceStatusCheck>> = [];
-    if (target.customerProfileSid !== undefined) {
-      assertSid(target.customerProfileSid, "customerProfileSid", "BU");
-      pending.push(
-        client.trusthub.v1
-          .customerProfiles(target.customerProfileSid)
-          .fetch()
-          .then((item) =>
-            classify("customer-profile", item.status ?? "UNKNOWN"),
-          ),
-      );
-    }
-    if (target.brandRegistrationSid !== undefined) {
+    assertSid(target.customerProfileSid, "customerProfileSid", "BU");
+    pending.push(
+      client.trusthub.v1
+        .customerProfiles(target.customerProfileSid)
+        .fetch()
+        .then((item) => classify("customer-profile", item)),
+    );
+    if (target.kind === "a2p") {
       assertSid(target.brandRegistrationSid, "brandRegistrationSid", "BN");
+      assertSid(target.campaignSid, "campaignSid");
+      assertSid(target.messagingServiceSid, "messagingServiceSid", "MG");
       pending.push(
         client.messaging.v1
           .brandRegistrations(target.brandRegistrationSid)
           .fetch()
-          .then((item) => classify("a2p-brand", item.status ?? "UNKNOWN")),
+          .then((item) => classify("a2p-brand", item)),
       );
-    }
-    if (
-      target.campaignSid !== undefined &&
-      target.messagingServiceSid !== undefined
-    ) {
-      assertSid(target.campaignSid, "campaignSid");
-      assertSid(target.messagingServiceSid, "messagingServiceSid", "MG");
       pending.push(
         client.messaging.v1
           .services(target.messagingServiceSid)
           .usAppToPerson(target.campaignSid)
           .fetch()
-          .then((item) =>
-            classify(
-              "a2p-campaign",
-              item.campaignStatus ?? item.status ?? "UNKNOWN",
-            ),
-          ),
+          .then((item) => classify("a2p-campaign", item)),
       );
-    }
-    if (target.tollfreeVerificationSid !== undefined) {
+    } else {
       assertSid(target.tollfreeVerificationSid, "tollfreeVerificationSid");
       pending.push(
         client.messaging.v1
           .tollfreeVerifications(target.tollfreeVerificationSid)
           .fetch()
-          .then((item) => classify("toll-free", item.status ?? "UNKNOWN")),
+          .then((item) => classify("toll-free", item)),
       );
     }
     const checks = await Promise.all(pending);

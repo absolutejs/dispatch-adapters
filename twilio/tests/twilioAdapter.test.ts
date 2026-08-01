@@ -3,17 +3,44 @@ import { createDispatcher } from "@absolutejs/dispatch";
 import { Twilio } from "twilio";
 import {
   createTwilioAdapter,
+  createTwilioScheduledMessageManager,
   createMemoryTwilioIdempotencyStore,
   TwilioConfigurationError,
+  TwilioIdempotencyConflictError,
+  TwilioIdempotencyIndeterminateError,
   TwilioSendError,
   type TwilioClientLike,
 } from "../src";
 
 const SERVICE_SID = "MG0123456789abcdef0123456789abcdef";
+const ACCOUNT_SID = `AC${"0".repeat(32)}`;
 const CALLBACK = "https://app.example.com/webhooks/twilio/messaging";
 
 test("manifest wiring uses the current Twilio SDK constructor export", () => {
   expect(typeof Twilio).toBe("function");
+});
+
+test("cancels and reconciles explicitly scheduled messages", async () => {
+  const messageSid = `MM${"7".repeat(32)}`;
+  const updates: unknown[] = [];
+  const manager = createTwilioScheduledMessageManager({
+    messages: (sid) => ({
+      fetch: async () => ({ sid, status: "scheduled" }),
+      update: async (input) => {
+        updates.push(input);
+        return { sid, status: "canceled" };
+      },
+    }),
+  });
+  expect(await manager.inspect(messageSid)).toMatchObject({
+    messageSid,
+    state: "pending",
+    status: "scheduled",
+  });
+  expect(await manager.cancel(messageSid)).toMatchObject({
+    state: "canceled",
+  });
+  expect(updates).toEqual([{ status: "canceled" }]);
 });
 
 const makeMockTwilio = () => {
@@ -47,6 +74,7 @@ const makeMockTwilio = () => {
 
 const createAdapter = (client: TwilioClientLike) =>
   createTwilioAdapter({
+    accountSid: ACCOUNT_SID,
     client,
     messagingServiceSid: SERVICE_SID,
     statusCallbackUrl: CALLBACK,
@@ -92,6 +120,7 @@ describe("createTwilioAdapter", () => {
   test("passes operational send controls", async () => {
     const mock = makeMockTwilio();
     const adapter = createTwilioAdapter({
+      accountSid: ACCOUNT_SID,
       client: mock.client,
       messagingServiceSid: SERVICE_SID,
       smartEncoded: true,
@@ -132,15 +161,18 @@ describe("createTwilioAdapter", () => {
     expect(mock.calls[0]?.to).toBe("rcs:+12025550100");
   });
 
-  test("sends media, templates, schedules, and tenant-routed WhatsApp", async () => {
+  test("sends templates, schedules, and tenant-routed WhatsApp", async () => {
     const base = makeMockTwilio();
     const tenant = makeMockTwilio();
     const tenantServiceSid = `MG${"9".repeat(32)}`;
     const sendAt = new Date(Date.now() + 3_600_000).toISOString();
     const adapter = createTwilioAdapter({
+      accountSid: ACCOUNT_SID,
+      allowNativeScheduling: true,
       client: base.client,
       messagingServiceSid: SERVICE_SID,
       resolveTenant: () => ({
+        accountSid: `AC${"9".repeat(32)}`,
         client: tenant.client,
         messagingServiceSid: tenantServiceSid,
       }),
@@ -148,7 +180,6 @@ describe("createTwilioAdapter", () => {
     });
     await adapter.send({
       channel: "whatsapp",
-      mediaUrls: ["https://cdn.example.com/image.jpg"],
       sendAt,
       template: {
         id: `HX${"8".repeat(32)}`,
@@ -161,7 +192,6 @@ describe("createTwilioAdapter", () => {
     expect(tenant.calls[0]).toMatchObject({
       contentSid: `HX${"8".repeat(32)}`,
       contentVariables: JSON.stringify({ "1": "Alex" }),
-      mediaUrl: ["https://cdn.example.com/image.jpg"],
       messagingServiceSid: tenantServiceSid,
       scheduleType: "fixed",
       to: "whatsapp:+12025550100",
@@ -169,9 +199,21 @@ describe("createTwilioAdapter", () => {
     expect(tenant.calls[0]?.sendAt?.toISOString()).toBe(sendAt);
   });
 
+  test("sends MMS media without a ContentSid", async () => {
+    const mock = makeMockTwilio();
+    await createAdapter(mock.client).send({
+      mediaUrls: ["https://cdn.example.com/image.jpg"],
+      to: "+12025550100",
+    });
+    expect(mock.calls[0]).toMatchObject({
+      mediaUrl: ["https://cdn.example.com/image.jpg"],
+    });
+  });
+
   test("deduplicates retry-safe sends with an atomic idempotency store", async () => {
     const mock = makeMockTwilio();
     const adapter = createTwilioAdapter({
+      accountSid: ACCOUNT_SID,
       client: mock.client,
       idempotencyStore: createMemoryTwilioIdempotencyStore(),
       messagingServiceSid: SERVICE_SID,
@@ -188,6 +230,93 @@ describe("createTwilioAdapter", () => {
     expect(mock.calls).toHaveLength(1);
   });
 
+  test("rejects idempotency key reuse with a different payload", async () => {
+    const mock = makeMockTwilio();
+    const adapter = createTwilioAdapter({
+      accountSid: ACCOUNT_SID,
+      client: mock.client,
+      idempotencyStore: createMemoryTwilioIdempotencyStore(),
+      messagingServiceSid: SERVICE_SID,
+      statusCallbackUrl: CALLBACK,
+    });
+    await adapter.send({
+      body: "first",
+      idempotencyKey: "operation-1",
+      to: "+12025550100",
+    });
+    await expect(
+      adapter.send({
+        body: "changed",
+        idempotencyKey: "operation-1",
+        to: "+12025550100",
+      }),
+    ).rejects.toBeInstanceOf(TwilioIdempotencyConflictError);
+    expect(mock.calls).toHaveLength(1);
+  });
+
+  test("fails closed when a provider call has an indeterminate outcome", async () => {
+    const mock = makeMockTwilio();
+    mock.failWith(new Error("connection reset after write"));
+    const adapter = createTwilioAdapter({
+      accountSid: ACCOUNT_SID,
+      client: mock.client,
+      idempotencyStore: createMemoryTwilioIdempotencyStore(),
+      messagingServiceSid: SERVICE_SID,
+      statusCallbackUrl: CALLBACK,
+    });
+    const message = {
+      body: "once",
+      idempotencyKey: "operation-2",
+      to: "+12025550100",
+    };
+    await expect(adapter.send(message)).rejects.toThrow("connection reset");
+    await expect(adapter.send(message)).rejects.toBeInstanceOf(
+      TwilioIdempotencyIndeterminateError,
+    );
+    expect(mock.calls).toHaveLength(1);
+  });
+
+  test("passes explicit Twilio address and content retention controls", async () => {
+    const mock = makeMockTwilio();
+    await createAdapter(mock.client).send({
+      body: "sensitive alert",
+      privacy: { addressRetention: "obfuscate", contentRetention: "discard" },
+      to: "+12025550100",
+    });
+    expect(mock.calls[0]).toMatchObject({
+      addressRetention: "obfuscate",
+      contentRetention: "discard",
+    });
+  });
+
+  test("requires consent coverage for automatic RCS fallback", async () => {
+    const mock = makeMockTwilio();
+    await expect(
+      createAdapter(mock.client).send({
+        body: "alert",
+        channel: "rcs",
+        consent: {
+          deliveryTransports: ["rcs"],
+          programId: "alerts",
+          purpose: "incident-alerts",
+        },
+        rcs: { fallback: "automatic" },
+        to: "+12025550100",
+      }),
+    ).rejects.toThrow("including sms");
+  });
+
+  test("disables native scheduling unless explicitly enabled", async () => {
+    const mock = makeMockTwilio();
+    await expect(
+      createAdapter(mock.client).send({
+        body: "later",
+        sendAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        to: "+12025550100",
+      }),
+    ).rejects.toThrow("native scheduling is disabled");
+  });
+
   test.each([
     ["invalid service SID", { messagingServiceSid: "MG_bad" }],
     ["insecure callback", { statusCallbackUrl: "http://example.com/hook" }],
@@ -196,6 +325,7 @@ describe("createTwilioAdapter", () => {
     const mock = makeMockTwilio();
     expect(() =>
       createTwilioAdapter({
+        accountSid: ACCOUNT_SID,
         client: mock.client,
         messagingServiceSid: SERVICE_SID,
         statusCallbackUrl: CALLBACK,
