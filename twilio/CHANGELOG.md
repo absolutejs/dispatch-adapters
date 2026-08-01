@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.1] — 2026-08-01
+
+- Include the repository's Apache 2.0 license text in published artifacts.
+
 ## [0.2.0] — 2026-08-01
 
 ### Messaging

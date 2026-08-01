@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-twilio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Production Twilio SMS for @absolutejs/dispatch with Messaging Service routing, signed lifecycle webhooks, opt-out events, and readiness checks.",
   "repository": {
     "type": "git",
