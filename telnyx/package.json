@@ -1,13 +1,13 @@
 {
-  "name": "@absolutejs/dispatch-twilio",
-  "version": "0.5.0",
-  "description": "Production Twilio SMS, MMS, RCS, and WhatsApp for @absolutejs/dispatch with consent enforcement, signed webhooks, registration automation, and readiness checks.",
+  "name": "@absolutejs/dispatch-telnyx",
+  "version": "0.1.0",
+  "description": "Production Telnyx SMS, MMS, and RCS messaging for @absolutejs/dispatch with signed webhooks, consent-safe scheduling, registration workflows, and readiness checks.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/absolutejs/dispatch-adapters.git",
-    "directory": "twilio"
+    "directory": "telnyx"
   },
-  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/twilio",
+  "homepage": "https://github.com/absolutejs/dispatch-adapters/tree/main/telnyx",
   "bugs": {
     "url": "https://github.com/absolutejs/dispatch-adapters/issues"
   },
@@ -21,18 +21,17 @@
     "access": "public"
   },
   "keywords": [
-    "dispatch",
-    "sms",
-    "rcs",
-    "a2p-10dlc",
-    "twilio",
     "absolutejs",
-    "transactional"
+    "dispatch",
+    "telnyx",
+    "sms",
+    "mms",
+    "rcs",
+    "10dlc"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/compliance --external @absolutejs/dispatch --external '@absolutejs/dispatch/*' --external @absolutejs/manifest --external @sinclair/typebox --external twilio --external 'twilio/*' && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/compliance --external @absolutejs/dispatch --external '@absolutejs/dispatch/*' --external @absolutejs/reliability --external '@absolutejs/reliability/*' --external @absolutejs/manifest --external @sinclair/typebox --external telnyx --external 'telnyx/*' && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test",
-    "test:postgres": "bun test tests/twilioPostgres.test.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
     "verify-package": "absolute-manifest verify-package",
@@ -42,7 +41,17 @@
   "peerDependencies": {
     "@absolutejs/compliance": ">=0.5.0 <0.6",
     "@absolutejs/dispatch": ">=0.5.0 <0.6",
-    "twilio": ">=5.0.0 <7"
+    "telnyx": ">=7.0.0 <8"
+  },
+  "peerDependenciesMeta": {
+    "@absolutejs/compliance": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@absolutejs/manifest": "0.7.2",
+    "@absolutejs/reliability": "0.1.0",
+    "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
     "@absolutejs/compliance": "0.5.0",
@@ -51,13 +60,8 @@
     "@types/pg": "8.20.3",
     "pg": "8.22.0",
     "prettier": "3.8.1",
-    "twilio": "6.0.2",
-    "typescript": "5.8.3"
-  },
-  "peerDependenciesMeta": {
-    "@absolutejs/compliance": {
-      "optional": true
-    }
+    "telnyx": "7.12.0",
+    "typescript": "5.9.3"
   },
   "exports": {
     ".": {
@@ -74,7 +78,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "absolutejs": {
     "manifestContract": 2,
@@ -98,20 +103,16 @@
         "range": ">=0.5.0 <0.6",
         "tested": "0.5.0"
       },
-      "twilio": {
+      "telnyx": {
         "artifactImports": [],
         "buildExternals": [
-          "twilio",
-          "twilio/*"
+          "telnyx",
+          "telnyx/*"
         ],
         "optional": false,
-        "range": ">=5.0.0 <7",
-        "tested": "6.0.2"
+        "range": ">=7.0.0 <8",
+        "tested": "7.12.0"
       }
     }
-  },
-  "dependencies": {
-    "@absolutejs/manifest": "0.7.2",
-    "@sinclair/typebox": "^0.34.0"
   }
 }

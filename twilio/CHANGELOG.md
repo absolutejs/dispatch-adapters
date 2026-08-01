@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] — 2026-08-01
+
+- Adopt Dispatch's provider-neutral messaging contract with typed endpoints,
+  discriminated content, and explicit fallback routes.
+- Remove the legacy SMS adapter/message surface.
+- Report requested transport in send results and derive RCS fallback behavior
+  solely from declared routes.
+
 ## [0.4.0] — 2026-08-01
 
 - Replace global idempotency with account/tenant scope, payload fingerprints, fencing, and fail-closed indeterminate outcomes.
@@ -99,12 +107,12 @@ Production messaging lifecycle release. This intentionally replaces the
 
 ## [0.0.1] — 2026-05-30
 
-Initial preview. Twilio-backed `SmsAdapter` for `@absolutejs/dispatch`.
+Initial preview. Twilio-backed `MessagingAdapter` for `@absolutejs/dispatch`.
 
 ### Surface
 
 - **`createTwilioAdapter({ client, defaultFrom?, messagingServiceSid?, statusCallback? })`** —
-  returns an `SmsAdapter`.
+  returns an `MessagingAdapter`.
 - **`TwilioClientLike`** — minimal subset of Twilio's client
   (`messages.create`); keeps `twilio` a true peer dep.
 - **Sender precedence**: `message.from` > `defaultFrom` >

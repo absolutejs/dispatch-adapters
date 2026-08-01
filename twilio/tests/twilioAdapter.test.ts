@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createDispatcher } from "@absolutejs/dispatch";
+import { createDispatcher, type MessagingMessage } from "@absolutejs/dispatch";
 import { Twilio } from "twilio";
 import {
   createTwilioAdapter,
@@ -15,6 +15,14 @@ import {
 const SERVICE_SID = "MG0123456789abcdef0123456789abcdef";
 const ACCOUNT_SID = `AC${"0".repeat(32)}`;
 const CALLBACK = "https://app.example.com/webhooks/twilio/messaging";
+const textMessage = (
+  text: string,
+  input: Partial<MessagingMessage> = {},
+): MessagingMessage => ({
+  content: { kind: "text", text },
+  to: { address: "+12025550100", transport: "sms" },
+  ...input,
+});
 
 test("manifest wiring uses the current Twilio SDK constructor export", () => {
   expect(typeof Twilio).toBe("function");
@@ -83,11 +91,10 @@ const createAdapter = (client: TwilioClientLike) =>
 describe("createTwilioAdapter", () => {
   test("always sends through the configured Messaging Service and callback", async () => {
     const mock = makeMockTwilio();
-    const dispatcher = createDispatcher({ sms: createAdapter(mock.client) });
-    const result = await dispatcher.sms({
-      body: "Pro alert",
-      to: "+12025550100",
+    const dispatcher = createDispatcher({
+      messaging: createAdapter(mock.client),
     });
+    const result = await dispatcher.messaging(textMessage("Pro alert"));
 
     expect(mock.calls).toEqual([
       {
@@ -105,12 +112,14 @@ describe("createTwilioAdapter", () => {
 
   test("pins a per-message sender while retaining Messaging Service policy", async () => {
     const mock = makeMockTwilio();
-    const dispatcher = createDispatcher({ sms: createAdapter(mock.client) });
-    await dispatcher.sms({
-      body: "Pro alert",
-      from: "+12025550199",
-      to: "+12025550100",
+    const dispatcher = createDispatcher({
+      messaging: createAdapter(mock.client),
     });
+    await dispatcher.messaging(
+      textMessage("Pro alert", {
+        from: { address: "+12025550199", transport: "sms" },
+      }),
+    );
     expect(mock.calls[0]).toMatchObject({
       from: "+12025550199",
       messagingServiceSid: SERVICE_SID,
@@ -127,7 +136,7 @@ describe("createTwilioAdapter", () => {
       statusCallbackUrl: CALLBACK,
       validityPeriod: 300,
     });
-    await adapter.send({ body: "alert", to: "+12025550100" });
+    await adapter.send(textMessage("alert"));
     expect(mock.calls[0]).toMatchObject({
       smartEncoded: true,
       validityPeriod: 300,
@@ -137,12 +146,17 @@ describe("createTwilioAdapter", () => {
   test("sends RCS with automatic SMS fallback", async () => {
     const mock = makeMockTwilio();
     const adapter = createAdapter(mock.client);
-    await adapter.send({
-      body: "Rich alert",
-      channel: "rcs",
-      rcs: { fallbackFrom: "+12025550199" },
-      to: "+12025550100",
-    });
+    await adapter.send(
+      textMessage("Rich alert", {
+        fallbacks: [
+          {
+            from: { address: "+12025550199", transport: "sms" },
+            transport: "sms",
+          },
+        ],
+        to: { address: "+12025550100", transport: "rcs" },
+      }),
+    );
     expect(mock.calls[0]).toMatchObject({
       fallbackFrom: "+12025550199",
       to: "+12025550100",
@@ -152,12 +166,11 @@ describe("createTwilioAdapter", () => {
   test("can require RCS without SMS fallback", async () => {
     const mock = makeMockTwilio();
     const adapter = createAdapter(mock.client);
-    await adapter.send({
-      body: "Rich alert",
-      channel: "rcs",
-      rcs: { fallback: "disabled" },
-      to: "+12025550100",
-    });
+    await adapter.send(
+      textMessage("Rich alert", {
+        to: { address: "+12025550100", transport: "rcs" },
+      }),
+    );
     expect(mock.calls[0]?.to).toBe("rcs:+12025550100");
   });
 
@@ -179,14 +192,14 @@ describe("createTwilioAdapter", () => {
       statusCallbackUrl: CALLBACK,
     });
     await adapter.send({
-      channel: "whatsapp",
-      sendAt,
-      template: {
+      content: {
         id: `HX${"8".repeat(32)}`,
+        kind: "template",
         variables: { "1": "Alex" },
       },
+      sendAt,
       tenant: "tenant-1",
-      to: "whatsapp:+12025550100",
+      to: { address: "+12025550100", transport: "whatsapp" },
     });
     expect(base.calls).toHaveLength(0);
     expect(tenant.calls[0]).toMatchObject({
@@ -202,8 +215,11 @@ describe("createTwilioAdapter", () => {
   test("sends MMS media without a ContentSid", async () => {
     const mock = makeMockTwilio();
     await createAdapter(mock.client).send({
-      mediaUrls: ["https://cdn.example.com/image.jpg"],
-      to: "+12025550100",
+      content: {
+        kind: "media",
+        mediaUrls: ["https://cdn.example.com/image.jpg"],
+      },
+      to: { address: "+12025550100", transport: "mms" },
     });
     expect(mock.calls[0]).toMatchObject({
       mediaUrl: ["https://cdn.example.com/image.jpg"],
@@ -219,11 +235,9 @@ describe("createTwilioAdapter", () => {
       messagingServiceSid: SERVICE_SID,
       statusCallbackUrl: CALLBACK,
     });
-    const message = {
-      body: "once",
+    const message = textMessage("once", {
       idempotencyKey: "alert:incident-1:user-1",
-      to: "+12025550100",
-    };
+    });
     const first = await adapter.send(message);
     const retry = await adapter.send(message);
     expect(retry).toEqual(first);
@@ -239,17 +253,9 @@ describe("createTwilioAdapter", () => {
       messagingServiceSid: SERVICE_SID,
       statusCallbackUrl: CALLBACK,
     });
-    await adapter.send({
-      body: "first",
-      idempotencyKey: "operation-1",
-      to: "+12025550100",
-    });
+    await adapter.send(textMessage("first", { idempotencyKey: "operation-1" }));
     await expect(
-      adapter.send({
-        body: "changed",
-        idempotencyKey: "operation-1",
-        to: "+12025550100",
-      }),
+      adapter.send(textMessage("changed", { idempotencyKey: "operation-1" })),
     ).rejects.toBeInstanceOf(TwilioIdempotencyConflictError);
     expect(mock.calls).toHaveLength(1);
   });
@@ -264,11 +270,9 @@ describe("createTwilioAdapter", () => {
       messagingServiceSid: SERVICE_SID,
       statusCallbackUrl: CALLBACK,
     });
-    const message = {
-      body: "once",
+    const message = textMessage("once", {
       idempotencyKey: "operation-2",
-      to: "+12025550100",
-    };
+    });
     await expect(adapter.send(message)).rejects.toThrow("connection reset");
     await expect(adapter.send(message)).rejects.toBeInstanceOf(
       TwilioIdempotencyIndeterminateError,
@@ -278,42 +282,49 @@ describe("createTwilioAdapter", () => {
 
   test("passes explicit Twilio address and content retention controls", async () => {
     const mock = makeMockTwilio();
-    await createAdapter(mock.client).send({
-      body: "sensitive alert",
-      privacy: { addressRetention: "obfuscate", contentRetention: "discard" },
-      to: "+12025550100",
-    });
+    await createAdapter(mock.client).send(
+      textMessage("sensitive alert", {
+        privacy: {
+          addressRetention: "obfuscate",
+          contentRetention: "discard",
+        },
+      }),
+    );
     expect(mock.calls[0]).toMatchObject({
       addressRetention: "obfuscate",
       contentRetention: "discard",
     });
   });
 
-  test("requires consent coverage for automatic RCS fallback", async () => {
+  test("rejects provider-incompatible fallback content", async () => {
     const mock = makeMockTwilio();
     await expect(
-      createAdapter(mock.client).send({
-        body: "alert",
-        channel: "rcs",
-        consent: {
-          deliveryTransports: ["rcs"],
-          programId: "alerts",
-          purpose: "incident-alerts",
-        },
-        rcs: { fallback: "automatic" },
-        to: "+12025550100",
-      }),
-    ).rejects.toThrow("including sms");
+      createAdapter(mock.client).send(
+        textMessage("alert", {
+          consent: {
+            programId: "alerts",
+            purpose: "incident-alerts",
+          },
+          fallbacks: [
+            {
+              content: { kind: "text", text: "different" },
+              transport: "sms",
+            },
+          ],
+          to: { address: "+12025550100", transport: "rcs" },
+        }),
+      ),
+    ).rejects.toThrow("fallback content");
   });
 
   test("disables native scheduling unless explicitly enabled", async () => {
     const mock = makeMockTwilio();
     await expect(
-      createAdapter(mock.client).send({
-        body: "later",
-        sendAt: new Date(Date.now() + 60 * 60_000).toISOString(),
-        to: "+12025550100",
-      }),
+      createAdapter(mock.client).send(
+        textMessage("later", {
+          sendAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        }),
+      ),
     ).rejects.toThrow("native scheduling is disabled");
   });
 
@@ -334,27 +345,30 @@ describe("createTwilioAdapter", () => {
     ).toThrow(TwilioConfigurationError);
   });
 
-  test.each([
-    [{ body: "alert", to: "2025550100" }, "recipient"],
-    [{ body: "alert", from: "sender", to: "+12025550100" }, "sender"],
-    [{ body: "  ", to: "+12025550100" }, "body"],
+  test.each<[MessagingMessage, string]>([
     [
-      {
-        body: "alert",
-        channel: "rcs" as const,
-        from: "+12025550199",
-        to: "+12025550100",
-      },
+      textMessage("alert", { to: { address: "2025550100", transport: "sms" } }),
+      "recipient",
+    ],
+    [
+      textMessage("alert", {
+        from: { address: "sender", transport: "sms" },
+      }),
+      "sender",
+    ],
+    [textMessage("  "), "body"],
+    [
+      textMessage("alert", {
+        from: { address: "+12025550199", transport: "rcs" },
+        to: { address: "+12025550100", transport: "rcs" },
+      }),
       "RCS sender",
     ],
     [
-      {
-        body: "alert",
-        channel: "sms" as const,
-        from: "whatsapp:+12025550199",
-        to: "+12025550100",
-      },
-      "sender",
+      textMessage("alert", {
+        from: { address: "+12025550199", transport: "whatsapp" },
+      }),
+      "transport",
     ],
   ])("rejects malformed outbound messages", async (message, expected) => {
     const mock = makeMockTwilio();
@@ -369,11 +383,11 @@ describe("createTwilioAdapter", () => {
     mock.failWith(new Error("rate limited"));
     const dispatcher = createDispatcher({
       onError: () => {},
-      sms: createAdapter(mock.client),
+      messaging: createAdapter(mock.client),
     });
-    await expect(
-      dispatcher.sms({ body: "alert", to: "+12025550100" }),
-    ).rejects.toThrow("rate limited");
+    await expect(dispatcher.messaging(textMessage("alert"))).rejects.toThrow(
+      "rate limited",
+    );
     expect(dispatcher.metrics().failed).toBe(1);
   });
 
@@ -384,7 +398,7 @@ describe("createTwilioAdapter", () => {
       errorMessage: "Recipient unsubscribed",
     });
     await expect(
-      createAdapter(mock.client).send({ body: "alert", to: "+12025550100" }),
+      createAdapter(mock.client).send(textMessage("alert")),
     ).rejects.toBeInstanceOf(TwilioSendError);
   });
 });

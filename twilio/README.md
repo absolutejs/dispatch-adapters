@@ -24,7 +24,7 @@ const accountSid = process.env.TWILIO_ACCOUNT_SID!;
 const client = new Twilio(accountSid, process.env.TWILIO_AUTH_TOKEN!);
 
 const dispatcher = createDispatcher({
-  sms: createTwilioAdapter({
+  messaging: createTwilioAdapter({
     accountSid,
     client,
     messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
@@ -34,41 +34,44 @@ const dispatcher = createDispatcher({
   }),
 });
 
-await dispatcher.sms({
-  body: "CPU usage has exceeded 90%.",
+await dispatcher.messaging({
+  content: { kind: "text", text: "CPU usage has exceeded 90%." },
   consent: {
     programId: "pro-alerts",
     purpose: "incident-alerts",
-    deliveryTransports: ["sms"],
   },
   privacy: {
     addressRetention: "obfuscate",
     contentRetention: "discard",
   },
   tenant: "tenant-a",
-  to: "+12025550100",
+  to: { address: "+12025550100", transport: "sms" },
 });
 ```
 
-RCS automatic fallback must declare consent for both possible routes:
+RCS fallback is declared as a route, so the compliance policy automatically
+checks consent for both transports:
 
 ```ts
-await dispatcher.sms({
-  body: "CPU usage has exceeded 90%.",
-  channel: "rcs",
+await dispatcher.messaging({
+  content: { kind: "template", id: "HX0123456789abcdef0123456789abcdef" },
   consent: {
     programId: "pro-alerts",
     purpose: "incident-alerts",
-    deliveryTransports: ["rcs", "sms"],
   },
-  rcs: { fallback: "automatic", fallbackFrom: "+12025550199" },
-  to: "+12025550100",
+  fallbacks: [
+    {
+      from: { address: "+12025550199", transport: "sms" },
+      transport: "sms",
+    },
+  ],
+  to: { address: "+12025550100", transport: "rcs" },
 });
 ```
 
-Set `rcs.fallback` to `"disabled"` when fallback is prohibited. Templates use
-a Twilio `HX` Content SID and are mutually exclusive with `body` and
-`mediaUrls`.
+Omit `fallbacks` to require RCS. Twilio rich content uses a published `HX`
+Content SID through `content.kind: "template"`; portable text and media content
+use their own exclusive content variants.
 
 ### Idempotency and tenant isolation
 

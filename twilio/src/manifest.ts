@@ -15,7 +15,7 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
   },
   implements: [
     defineImplementation<CreateTwilioAdapterOptions>()({
-      contract: "dispatch/sms-adapter",
+      contract: "dispatch/messaging-adapter",
       factory: "createTwilioAdapter",
       from: "@absolutejs/dispatch-twilio",
       requires: {

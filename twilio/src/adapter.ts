@@ -1,4 +1,4 @@
-import type { SmsAdapter, SmsMessage } from "@absolutejs/dispatch";
+import type { MessagingAdapter, MessagingMessage } from "@absolutejs/dispatch";
 import {
   fingerprintTwilioPayload,
   TwilioIdempotencyIndeterminateError,
@@ -85,8 +85,6 @@ export class TwilioIdempotencyInFlightError extends Error {
 }
 
 const E164 = /^\+[1-9]\d{1,14}$/;
-const RCS_RECIPIENT = /^rcs:\+[1-9]\d{1,14}$/;
-const WHATSAPP = /^whatsapp:\+[1-9]\d{1,14}$/;
 const MESSAGING_SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
 const ACCOUNT_SID = /^AC[0-9a-fA-F]{32}$/;
 const CONTENT_SID = /^HX[0-9a-fA-F]{32}$/;
@@ -135,97 +133,79 @@ const assertConfiguration = (options: CreateTwilioAdapterOptions) => {
 };
 
 const assertMessage = (
-  message: SmsMessage,
+  message: MessagingMessage,
   options: Pick<CreateTwilioAdapterOptions, "allowNativeScheduling" | "now">,
 ) => {
-  const channel = message.channel ?? "sms";
-  if (
-    (channel === "whatsapp" && !WHATSAPP.test(message.to)) ||
-    (channel === "rcs" &&
-      !E164.test(message.to) &&
-      !RCS_RECIPIENT.test(message.to)) ||
-    (channel !== "whatsapp" && channel !== "rcs" && !E164.test(message.to))
-  ) {
+  const transport = message.to.transport;
+  if (!E164.test(message.to.address)) {
+    throw new TwilioConfigurationError("recipient address must be E.164");
+  }
+  if (message.fallbacks !== undefined && transport !== "rcs") {
     throw new TwilioConfigurationError(
-      "recipient must match the selected messaging channel",
+      "Twilio fallback routes are supported only for an RCS primary route",
     );
   }
-  if (channel !== "rcs" && message.rcs !== undefined) {
-    throw new TwilioConfigurationError("rcs options require channel rcs");
-  }
-  if (message.rcs?.fallback === "automatic" && RCS_RECIPIENT.test(message.to)) {
+  if ((message.fallbacks?.length ?? 0) > 1) {
     throw new TwilioConfigurationError(
-      "automatic RCS fallback requires an E.164 recipient without the rcs: prefix",
+      "Twilio RCS supports at most one SMS fallback route",
     );
   }
-  if (message.rcs?.fallbackFrom !== undefined) {
-    if (!E164.test(message.rcs.fallbackFrom)) {
+  const fallback = message.fallbacks?.[0];
+  if (fallback !== undefined && fallback.transport !== "sms") {
+    throw new TwilioConfigurationError("Twilio RCS fallback must use SMS");
+  }
+  if (fallback?.content !== undefined) {
+    throw new TwilioConfigurationError(
+      "Twilio fallback content is defined by the Content Template and cannot be overridden per route",
+    );
+  }
+  if (transport === "rcs" && message.from !== undefined) {
+    throw new TwilioConfigurationError(
+      "RCS sender comes from the Messaging Service pool; set the fallback route sender instead",
+    );
+  }
+  if (message.from !== undefined) {
+    if (message.from.transport !== transport) {
       throw new TwilioConfigurationError(
-        "RCS fallback sender must be an E.164 phone number",
+        "primary sender transport must match the recipient transport",
       );
     }
-    if (message.rcs.fallback === "disabled" || RCS_RECIPIENT.test(message.to)) {
-      throw new TwilioConfigurationError(
-        "RCS fallback sender cannot be used when fallback is disabled",
-      );
+    if (!E164.test(message.from.address)) {
+      throw new TwilioConfigurationError("sender address must be E.164");
     }
   }
-  if (message.consent !== undefined && channel === "rcs") {
-    const declared = new Set(message.consent.deliveryTransports);
-    const required =
-      message.rcs?.fallback === "automatic" ? ["rcs", "sms"] : ["rcs"];
+  if (fallback?.from !== undefined) {
     if (
-      required.some((transport) => !declared.has(transport as "rcs" | "sms"))
+      fallback.from.transport !== fallback.transport ||
+      !E164.test(fallback.from.address)
     ) {
       throw new TwilioConfigurationError(
-        "consent.deliveryTransports must include every RCS delivery route, including sms when automatic fallback is enabled",
+        "fallback sender must be an E.164 endpoint matching the fallback transport",
       );
     }
   }
-  if (channel === "rcs" && message.from !== undefined) {
-    throw new TwilioConfigurationError(
-      "RCS sender comes from the Messaging Service pool; use rcs.fallbackFrom for fallback",
-    );
-  }
   if (
-    message.from !== undefined &&
-    ((channel === "whatsapp" && !WHATSAPP.test(message.from)) ||
-      (channel !== "whatsapp" && !E164.test(message.from)))
+    message.content.kind === "text" &&
+    message.content.text.trim().length === 0
   ) {
-    throw new TwilioConfigurationError(
-      "SMS sender must be an E.164 phone number",
-    );
-  }
-  const hasMedia = (message.mediaUrls?.length ?? 0) > 0;
-  if (
-    message.body === undefined &&
-    message.template === undefined &&
-    !hasMedia
-  ) {
-    throw new TwilioConfigurationError(
-      "message body, media, or template is required",
-    );
-  }
-  if (message.body !== undefined && message.body.trim().length === 0) {
     throw new TwilioConfigurationError("message body must not be empty");
   }
   if (
-    message.template !== undefined &&
-    !CONTENT_SID.test(message.template.id)
+    message.content.kind === "template" &&
+    !CONTENT_SID.test(message.content.id)
   ) {
     throw new TwilioConfigurationError(
       "template id must be a Twilio Content SID",
     );
   }
-  if (
-    message.template !== undefined &&
-    (message.body !== undefined || hasMedia)
-  ) {
+  if (message.content.kind === "rich") {
     throw new TwilioConfigurationError(
-      "Twilio ContentSid replaces body and mediaUrls; template content must be exclusive",
+      "Twilio rich content must be published as a Content Template and sent with content.kind template",
     );
   }
-  for (const mediaUrl of message.mediaUrls ?? []) {
+  for (const mediaUrl of message.content.kind === "media"
+    ? message.content.mediaUrls
+    : []) {
     let parsed: URL;
     try {
       parsed = new URL(mediaUrl);
@@ -265,7 +245,7 @@ const assertMessage = (
 
 export const createTwilioAdapter = (
   options: CreateTwilioAdapterOptions,
-): SmsAdapter => {
+): MessagingAdapter => {
   assertConfiguration(options);
 
   return {
@@ -292,49 +272,56 @@ export const createTwilioAdapter = (
         ...(message.privacy?.addressRetention === undefined
           ? {}
           : { addressRetention: message.privacy.addressRetention }),
-        ...(message.body === undefined ? {} : { body: message.body }),
-        ...(message.mediaUrls === undefined
-          ? {}
-          : { mediaUrl: [...message.mediaUrls] }),
-        ...(message.template === undefined
-          ? {}
-          : {
-              contentSid: message.template.id,
-              ...(message.template.variables === undefined
+        ...(message.content.kind === "text"
+          ? { body: message.content.text }
+          : {}),
+        ...(message.content.kind === "media"
+          ? {
+              ...(message.content.text === undefined
+                ? {}
+                : { body: message.content.text }),
+              mediaUrl: [...message.content.mediaUrls],
+            }
+          : {}),
+        ...(message.content.kind === "template"
+          ? {
+              contentSid: message.content.id,
+              ...(message.content.variables === undefined
                 ? {}
                 : {
-                    contentVariables: JSON.stringify(
-                      message.template.variables,
-                    ),
+                    contentVariables: JSON.stringify(message.content.variables),
                   }),
-            }),
+            }
+          : {}),
         ...(message.privacy?.contentRetention === undefined
           ? {}
           : { contentRetention: message.privacy.contentRetention }),
         messagingServiceSid,
         statusCallback,
         to:
-          message.channel === "rcs" &&
-          message.rcs?.fallback === "disabled" &&
-          E164.test(message.to)
-            ? `rcs:${message.to}`
-            : message.to,
+          message.to.transport === "rcs" && message.fallbacks === undefined
+            ? `rcs:${message.to.address}`
+            : message.to.transport === "whatsapp"
+              ? `whatsapp:${message.to.address}`
+              : message.to.address,
       };
-      if (message.rcs?.fallbackFrom !== undefined) {
-        params.fallbackFrom = message.rcs.fallbackFrom;
+      const fallback = message.fallbacks?.[0];
+      if (fallback?.from !== undefined) {
+        params.fallbackFrom = fallback.from.address;
       }
       const from =
-        message.channel === "rcs" ? undefined : (message.from ?? tenant?.from);
-      if (
-        from !== undefined &&
-        ((message.channel === "whatsapp" && !WHATSAPP.test(from)) ||
-          (message.channel !== "whatsapp" && !E164.test(from)))
-      ) {
+        message.to.transport === "rcs"
+          ? undefined
+          : (message.from?.address ?? tenant?.from);
+      if (from !== undefined && !E164.test(from)) {
         throw new TwilioConfigurationError(
-          "resolved sender must match the selected messaging channel",
+          "resolved sender must be an E.164 address",
         );
       }
-      if (from !== undefined) params.from = from;
+      if (from !== undefined) {
+        params.from =
+          message.to.transport === "whatsapp" ? `whatsapp:${from}` : from;
+      }
       if (message.sendAt !== undefined) {
         params.scheduleType = "fixed";
         params.sendAt = new Date(message.sendAt);
@@ -423,8 +410,10 @@ export const createTwilioAdapter = (
       }
       const result = {
         at: Date.now(),
+        fallbackAttempted: false,
         ...(response.sid === undefined ? {} : { id: response.sid }),
         provider: "twilio",
+        requestedTransport: message.to.transport,
       };
       if (scope !== undefined && claimToken !== undefined) {
         await options.idempotencyStore!.complete(scope, claimToken, {
