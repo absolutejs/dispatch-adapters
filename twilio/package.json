@@ -1,7 +1,7 @@
 {
   "name": "@absolutejs/dispatch-twilio",
-  "version": "0.0.3",
-  "description": "Twilio-backed SmsAdapter for @absolutejs/dispatch. Maps SmsMessage to Twilio messages.create; surfaces the Message SID as DispatchResult.id.",
+  "version": "0.1.0",
+  "description": "Production Twilio SMS for @absolutejs/dispatch with Messaging Service routing, signed lifecycle webhooks, opt-out events, and readiness checks.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/absolutejs/dispatch-adapters.git",

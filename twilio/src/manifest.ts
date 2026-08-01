@@ -8,7 +8,7 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
     accent: "#f22f46",
     category: "messaging",
     description:
-      "Twilio-backed `SmsAdapter` for `@absolutejs/dispatch`. Takes your Twilio client; supports single origination numbers and Messaging Service routing.",
+      "Production Twilio messaging for `@absolutejs/dispatch`, with Messaging Service sending, signed lifecycle webhooks, opt-out events, and readiness checks.",
     docsUrl: "https://github.com/absolutejs/dispatch-adapters/tree/main/twilio",
     name: "@absolutejs/dispatch-twilio",
     tagline: "Send text messages with Twilio.",
@@ -43,20 +43,30 @@ export const manifest = defineManifest<CreateTwilioAdapterOptions>()({
         ],
       },
       settings: Type.Object({
-        defaultFrom: Type.Optional(
-          Type.String({
-            description:
-              "The phone number texts are sent from, in international format. Leave empty when using a Messaging Service.",
-            examples: ["+12025550100"],
-            title: "Sending number",
+        messagingServiceSid: Type.String({
+          description:
+            "Twilio Messaging Service used for sender routing and opt-out management.",
+          example: "MG0123456789abcdef0123456789abcdef",
+          title: "Messaging Service SID",
+        }),
+        statusCallbackUrl: Type.String({
+          description:
+            "Public HTTPS endpoint handled by createTwilioWebhookHandler.",
+          example: "https://example.com/webhooks/twilio/messaging",
+          title: "Status callback URL",
+        }),
+        smartEncoded: Type.Optional(
+          Type.Boolean({
+            description: "Replace compatible Unicode characters with GSM-7.",
+            title: "Smart encoding",
           }),
         ),
-        messagingServiceSid: Type.Optional(
-          Type.String({
-            description:
-              "Use Twilio Messaging Service routing instead of a single number. Set this OR a sending number, not both.",
-            example: "MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            title: "Messaging Service SID",
+        validityPeriod: Type.Optional(
+          Type.Integer({
+            description: "Maximum send retry window in seconds (1–36000).",
+            maximum: 36000,
+            minimum: 1,
+            title: "Validity period",
           }),
         ),
       }),

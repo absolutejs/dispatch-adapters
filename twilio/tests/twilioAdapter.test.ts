@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { createDispatcher } from "@absolutejs/dispatch";
 import { Twilio } from "twilio";
-import { createTwilioAdapter, type TwilioClientLike } from "../src/index";
+import {
+  createTwilioAdapter,
+  TwilioConfigurationError,
+  TwilioSendError,
+  type TwilioClientLike,
+} from "../src";
+
+const SERVICE_SID = "MG0123456789abcdef0123456789abcdef";
+const CALLBACK = "https://app.example.com/webhooks/twilio/messaging";
 
 test("manifest wiring uses the current Twilio SDK constructor export", () => {
   expect(typeof Twilio).toBe("function");
@@ -10,205 +18,141 @@ test("manifest wiring uses the current Twilio SDK constructor export", () => {
 const makeMockTwilio = () => {
   const calls: Array<Parameters<TwilioClientLike["messages"]["create"]>[0]> =
     [];
-  let nextSid = 1;
-  let nextResponse:
-    | Awaited<ReturnType<TwilioClientLike["messages"]["create"]>>
-    | undefined;
-  let nextThrow: Error | undefined;
+  let response: Awaited<ReturnType<TwilioClientLike["messages"]["create"]>> = {
+    sid: "SM0123456789abcdef0123456789abcdef",
+    status: "queued",
+  };
+  let failure: Error | undefined;
   const client: TwilioClientLike = {
     messages: {
       create: async (params) => {
         calls.push(params);
-        if (nextThrow) {
-          const err = nextThrow;
-          nextThrow = undefined;
-          throw err;
-        }
-        return (
-          nextResponse ?? {
-            sid: `SM${String(nextSid++).padStart(32, "0")}`,
-            status: "queued",
-          }
-        );
+        if (failure !== undefined) throw failure;
+        return response;
       },
     },
   };
   return {
     calls,
     client,
-    setResponse: (
-      response: Awaited<ReturnType<TwilioClientLike["messages"]["create"]>>,
-    ) => {
-      nextResponse = response;
+    failWith: (error: Error) => {
+      failure = error;
     },
-    setThrow: (err: Error) => {
-      nextThrow = err;
+    respondWith: (next: typeof response) => {
+      response = next;
     },
   };
 };
 
+const createAdapter = (client: TwilioClientLike) =>
+  createTwilioAdapter({
+    client,
+    messagingServiceSid: SERVICE_SID,
+    statusCallbackUrl: CALLBACK,
+  });
+
 describe("createTwilioAdapter", () => {
-  test("maps SmsMessage fields to Twilio params", async () => {
+  test("always sends through the configured Messaging Service and callback", async () => {
     const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+15551234567",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    await dispatcher.sms({
-      body: "Your code: 482910",
+    const dispatcher = createDispatcher({ sms: createAdapter(mock.client) });
+    const result = await dispatcher.sms({
+      body: "Pro alert",
       to: "+12025550100",
     });
-    expect(mock.calls).toHaveLength(1);
+
+    expect(mock.calls).toEqual([
+      {
+        body: "Pro alert",
+        messagingServiceSid: SERVICE_SID,
+        statusCallback: CALLBACK,
+        to: "+12025550100",
+      },
+    ]);
+    expect(result).toMatchObject({
+      id: expect.stringMatching(/^SM/),
+      provider: "twilio",
+    });
+  });
+
+  test("pins a per-message sender while retaining Messaging Service policy", async () => {
+    const mock = makeMockTwilio();
+    const dispatcher = createDispatcher({ sms: createAdapter(mock.client) });
+    await dispatcher.sms({
+      body: "Pro alert",
+      from: "+12025550199",
+      to: "+12025550100",
+    });
     expect(mock.calls[0]).toMatchObject({
-      body: "Your code: 482910",
-      from: "+15551234567",
-      to: "+12025550100",
+      from: "+12025550199",
+      messagingServiceSid: SERVICE_SID,
     });
   });
 
-  test("returns Twilio sid as DispatchResult.id", async () => {
+  test("passes operational send controls", async () => {
     const mock = makeMockTwilio();
     const adapter = createTwilioAdapter({
       client: mock.client,
-      defaultFrom: "+15551234567",
+      messagingServiceSid: SERVICE_SID,
+      smartEncoded: true,
+      statusCallbackUrl: CALLBACK,
+      validityPeriod: 300,
     });
-    const dispatcher = createDispatcher({ sms: adapter });
-    const result = await dispatcher.sms({ body: "hi", to: "+15551" });
-    expect(result.provider).toBe("twilio");
-    expect(result.id).toMatch(/^SM/);
+    await adapter.send({ body: "alert", to: "+12025550100" });
+    expect(mock.calls[0]).toMatchObject({
+      smartEncoded: true,
+      validityPeriod: 300,
+    });
   });
 
-  test("per-message from overrides defaultFrom", async () => {
+  test.each([
+    ["invalid service SID", { messagingServiceSid: "MG_bad" }],
+    ["insecure callback", { statusCallbackUrl: "http://example.com/hook" }],
+    ["invalid validity", { validityPeriod: 0 }],
+  ])("rejects %s at construction", (_name, changed) => {
     const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+15551111111",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    await dispatcher.sms({
-      body: "hi",
-      from: "+15552222222",
-      to: "+15553333333",
-    });
-    expect(mock.calls[0]!.from).toBe("+15552222222");
+    expect(() =>
+      createTwilioAdapter({
+        client: mock.client,
+        messagingServiceSid: SERVICE_SID,
+        statusCallbackUrl: CALLBACK,
+        ...changed,
+      }),
+    ).toThrow(TwilioConfigurationError);
   });
 
-  test("messagingServiceSid is used when no from is available", async () => {
+  test.each([
+    [{ body: "alert", to: "2025550100" }, "recipient"],
+    [{ body: "alert", from: "sender", to: "+12025550100" }, "sender"],
+    [{ body: "  ", to: "+12025550100" }, "body"],
+  ])("rejects malformed outbound messages", async (message, expected) => {
     const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      messagingServiceSid: "MG_test_service",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    await dispatcher.sms({ body: "hi", to: "+1555" });
-    expect(mock.calls[0]!.messagingServiceSid).toBe("MG_test_service");
-    expect(mock.calls[0]!.from).toBeUndefined();
+    await expect(createAdapter(mock.client).send(message)).rejects.toThrow(
+      expected,
+    );
+    expect(mock.calls).toHaveLength(0);
   });
 
-  test("per-message from beats messagingServiceSid", async () => {
+  test("propagates SDK failures through dispatch observability", async () => {
     const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      messagingServiceSid: "MG_test_service",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    await dispatcher.sms({
-      body: "hi",
-      from: "+15551112222",
-      to: "+15553334444",
-    });
-    expect(mock.calls[0]!.from).toBe("+15551112222");
-    expect(mock.calls[0]!.messagingServiceSid).toBeUndefined();
-  });
-
-  test("throws when no sender (no from, no defaultFrom, no service)", async () => {
-    const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({ client: mock.client });
+    mock.failWith(new Error("rate limited"));
     const dispatcher = createDispatcher({
       onError: () => {},
-      sms: adapter,
+      sms: createAdapter(mock.client),
     });
-    await expect(dispatcher.sms({ body: "hi", to: "+1555" })).rejects.toThrow(
-      /no sender configured/,
-    );
-  });
-
-  test("statusCallback passes through when set", async () => {
-    const mock = makeMockTwilio();
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+1555",
-      statusCallback: "https://hooks.acme.io/twilio",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    await dispatcher.sms({ body: "hi", to: "+1556" });
-    expect(mock.calls[0]!.statusCallback).toBe("https://hooks.acme.io/twilio");
-  });
-
-  test("Twilio SDK throw propagates to dispatcher", async () => {
-    const mock = makeMockTwilio();
-    mock.setThrow(new Error("Rate limit exceeded"));
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+1555",
-    });
-    const dispatcher = createDispatcher({
-      onError: () => {},
-      sms: adapter,
-    });
-    await expect(dispatcher.sms({ body: "hi", to: "+1556" })).rejects.toThrow(
-      "Rate limit exceeded",
-    );
+    await expect(
+      dispatcher.sms({ body: "alert", to: "+12025550100" }),
+    ).rejects.toThrow("rate limited");
     expect(dispatcher.metrics().failed).toBe(1);
   });
 
-  test("errorCode in response throws (bulk-send case)", async () => {
+  test("turns response-level Twilio errors into a typed failure", async () => {
     const mock = makeMockTwilio();
-    mock.setResponse({
+    mock.respondWith({
       errorCode: 21610,
       errorMessage: "Recipient unsubscribed",
     });
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+1555",
-    });
-    const dispatcher = createDispatcher({
-      onError: () => {},
-      sms: adapter,
-    });
-    await expect(dispatcher.sms({ body: "hi", to: "+1556" })).rejects.toThrow(
-      /21610/,
-    );
-  });
-
-  test("errorCode null is treated as success", async () => {
-    const mock = makeMockTwilio();
-    mock.setResponse({
-      errorCode: null,
-      errorMessage: null,
-      sid: "SM_ok",
-      status: "queued",
-    });
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+1555",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    const result = await dispatcher.sms({ body: "hi", to: "+1556" });
-    expect(result.id).toBe("SM_ok");
-  });
-
-  test("handles missing sid gracefully", async () => {
-    const mock = makeMockTwilio();
-    mock.setResponse({ status: "queued" });
-    const adapter = createTwilioAdapter({
-      client: mock.client,
-      defaultFrom: "+1555",
-    });
-    const dispatcher = createDispatcher({ sms: adapter });
-    const result = await dispatcher.sms({ body: "hi", to: "+1556" });
-    expect(result.id).toBeUndefined();
-    expect(result.provider).toBe("twilio");
+    await expect(
+      createAdapter(mock.client).send({ body: "alert", to: "+12025550100" }),
+    ).rejects.toBeInstanceOf(TwilioSendError);
   });
 });

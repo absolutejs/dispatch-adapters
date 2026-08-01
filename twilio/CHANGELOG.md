@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.1.0] — 2026-07-31
+
+Production messaging lifecycle release. This intentionally replaces the
+`0.0.x` preview contract rather than preserving compatibility aliases.
+
+### Sending
+
+- Require a Twilio Messaging Service and an HTTPS status callback for every
+  adapter.
+- Keep optional per-message sender pinning inside Messaging Service policy.
+- Add E.164, Messaging Service SID, callback URL, body, and validity-period
+  validation before the provider call.
+- Add `smartEncoded` and `validityPeriod` controls.
+- Add typed configuration and response-level send errors.
+
+### Signed lifecycle webhooks
+
+- Add framework-neutral Request/Response webhook handling and a lower-level
+  processor.
+- Validate `X-Twilio-Signature` with the official Twilio SDK using the exact
+  public URL and complete form parameter set.
+- Normalize outbound delivery states and Advanced Opt-Out `STOP`, `START`, and
+  `HELP` events.
+- Reject malformed, forged, unsupported, and non-form callbacks before consumer
+  code runs.
+
+### Delivery guarantees and readiness
+
+- Add an atomic lifecycle store contract with claim, complete, release,
+  deduplication, stale-transition rejection, and abandoned-lease requirements.
+- Add a memory store for tests and local development.
+- Add an operational readiness report that requires durable lifecycle storage,
+  carrier approval, consent evidence, opt-out configuration, privacy policy,
+  and messaging terms while explicitly avoiding legal-certification claims.
+
+### Breaking
+
+- Remove `defaultFrom` and the service-or-number fallback model.
+- Require `messagingServiceSid` and `statusCallbackUrl`.
+- A per-message `from` no longer removes `messagingServiceSid`.
+
 ## [0.0.1] — 2026-05-30
 
 Initial preview. Twilio-backed `SmsAdapter` for `@absolutejs/dispatch`.
