@@ -13,6 +13,7 @@
 		"fcm",
 		"postmark",
 		"resend",
+		"sinch",
 		"telnyx",
 		"twilio",
 		"vonage"
