@@ -3,7 +3,7 @@
 Postmark-backed `EmailAdapter` for
 [@absolutejs/dispatch](https://github.com/absolutejs/dispatch).
 
-**Docs:** [absolutejs.com/documentation/dispatch-overview#postmark](https://absolutejs.com/documentation/dispatch-overview#postmark)
+**Docs:** [absolutejs.com/documentation/dispatch#postmark](https://absolutejs.com/documentation/dispatch#postmark)
 
 ## Install
 
