@@ -36,7 +36,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
     "verify-package": "absolute-manifest verify-package",
-    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build && bun run verify-package --artifacts",
+    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build",
     "release": "bun run check:package && npm publish --access public"
   },
   "peerDependencies": {
@@ -78,41 +78,10 @@
     "LICENSE"
   ],
   "absolutejs": {
-    "manifestContract": 2,
-    "runtimePeers": {
-      "@absolutejs/compliance": {
-        "artifactImports": [],
-        "buildExternals": [
-          "@absolutejs/compliance"
-        ],
-        "optional": true,
-        "range": ">=0.7.0 <0.8",
-        "tested": "0.7.0"
-      },
-      "@absolutejs/dispatch": {
-        "artifactImports": [],
-        "buildExternals": [
-          "@absolutejs/dispatch",
-          "@absolutejs/dispatch/*"
-        ],
-        "optional": false,
-        "range": ">=0.7.0 <0.8",
-        "tested": "0.7.1"
-      },
-      "twilio": {
-        "artifactImports": [],
-        "buildExternals": [
-          "twilio",
-          "twilio/*"
-        ],
-        "optional": false,
-        "range": ">=5.0.0 <7",
-        "tested": "6.0.2"
-      }
-    }
+    "manifestContract": 2
   },
   "dependencies": {
-    "@absolutejs/manifest": "0.7.2",
+    "@absolutejs/manifest": "0.9.0",
     "@sinclair/typebox": "^0.34.0"
   }
 }

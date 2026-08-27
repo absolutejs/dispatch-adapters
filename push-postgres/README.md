@@ -2,6 +2,10 @@
 
 Production persistence for the provider-neutral push lifecycle in `@absolutejs/dispatch`.
 
+The store supports APNs, FCM, and structured Web Push subscriptions. Its schema
+is additive: applying the current schema upgrades existing native-only tables,
+backfills their credential identity, and keeps native token rows intact.
+
 It stores tenant-isolated device registrations, user/device/topic targeting state, invalid-token retirement, and fenced idempotent fanout claims. Apply both exported schemas, then compose the stores with `createPushLifecycle`.
 
 ```ts
@@ -26,5 +30,6 @@ const lifecycle = createPushLifecycle({
 ```
 
 Registration is atomic across a stable `(tenant, platform, deviceId)` identity
-and the provider token. Token rotation retains the subscription identity and
-removes any superseded token record inside the same fenced transaction.
+and provider credential (native token or Web Push endpoint). Credential rotation
+retains the subscription identity and removes superseded records inside the same
+fenced transaction.
