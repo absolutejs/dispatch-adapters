@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Accept Dispatch 0.8 and 0.9 as well as 0.7. The push adapter contract is
+  unchanged, so installs alongside current Dispatch no longer warn about a
+  peer-range mismatch.
+
 ## 0.2.0 — 2026-08-01
 
 - Require the unified Dispatch 0.7 contract.
