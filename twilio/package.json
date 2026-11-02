@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-twilio",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Production Twilio SMS, MMS, RCS, and WhatsApp for @absolutejs/dispatch with consent enforcement, signed webhooks, registration automation, and readiness checks.",
   "repository": {
     "type": "git",
@@ -41,12 +41,12 @@
   },
   "peerDependencies": {
     "@absolutejs/compliance": ">=0.7.0 <0.8",
-    "@absolutejs/dispatch": ">=0.7.0 <0.8",
+    "@absolutejs/dispatch": ">=0.7.0 <0.10",
     "twilio": ">=5.0.0 <7"
   },
   "devDependencies": {
     "@absolutejs/compliance": "0.7.0",
-    "@absolutejs/dispatch": "0.7.1",
+    "@absolutejs/dispatch": "0.9.1",
     "@types/bun": "1.3.14",
     "@types/pg": "8.20.3",
     "pg": "8.22.0",

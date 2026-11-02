@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-sinch",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Production Sinch Conversation API adapter for AbsoluteJS with multichannel fallback, signed durable webhooks, consent, readiness, and 10DLC workflows.",
   "repository": {
     "type": "git",
@@ -41,7 +41,7 @@
   },
   "peerDependencies": {
     "@absolutejs/compliance": ">=0.7.0 <0.8",
-    "@absolutejs/dispatch": ">=0.7.0 <0.8",
+    "@absolutejs/dispatch": ">=0.7.0 <0.10",
     "@sinch/sdk-core": ">=1.5.0 <2"
   },
   "peerDependenciesMeta": {
@@ -56,7 +56,7 @@
   },
   "devDependencies": {
     "@absolutejs/compliance": "0.7.0",
-    "@absolutejs/dispatch": "0.7.1",
+    "@absolutejs/dispatch": "0.9.1",
     "@sinch/sdk-core": "1.5.0",
     "@types/bun": "1.3.14",
     "@types/pg": "8.20.3",
