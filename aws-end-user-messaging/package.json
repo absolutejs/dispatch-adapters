@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/dispatch-aws-end-user-messaging",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AWS End User Messaging SMS, MMS, RCS, Notify, and WhatsApp adapter for @absolutejs/dispatch.",
   "repository": {
     "type": "git",
@@ -39,7 +39,7 @@
     "release": "bun run check:package && npm publish --access public"
   },
   "peerDependencies": {
-    "@absolutejs/dispatch": ">=0.7.0 <0.8"
+    "@absolutejs/dispatch": ">=0.7.0 <0.10"
   },
   "dependencies": {
     "@absolutejs/manifest": "0.9.0",
@@ -49,7 +49,7 @@
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
-    "@absolutejs/dispatch": "0.7.1",
+    "@absolutejs/dispatch": "0.9.1",
     "@types/bun": "1.3.14",
     "prettier": "3.8.1",
     "typescript": "5.9.3"
